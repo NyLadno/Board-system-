@@ -98,7 +98,8 @@ export class ContextPanel {
     const cam = app.cam;
     const [sx, sy] = cam.toScreen(b.x + b.w / 2, b.y);
     const [, by] = cam.toScreen(0, b.y + b.h);
-    const pw = this.el.offsetWidth, ph = this.el.offsetHeight;
+    if (this._sizeDirty) { this._pw = this.el.offsetWidth; this._ph = this.el.offsetHeight; this._sizeDirty = false; }
+    const pw = this._pw, ph = this._ph;
     let x = sx - pw / 2;
     let y = sy - ph - 52; // выше ручки поворота
     if (y < 60) y = by + 16;
@@ -109,6 +110,7 @@ export class ContextPanel {
 
   build(sel) {
     const app = this.app;
+    this._sizeDirty = true;
     closePopover();
     const el = this.el;
     el.textContent = '';

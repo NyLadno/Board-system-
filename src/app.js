@@ -23,10 +23,9 @@ function hexToRgba(hex, a) {
 }
 
 const DEFAULT_SETTINGS = {
-  pressure: 0.8,
-  smoothing: 0,
-  predictMs: 16,
-  browserPrediction: true,
+  pressure: 0.65,
+  smoothing: 0.35,
+  predictMs: 14,
   palmRejection: true,
   touchDraw: false,
   theme: 'auto',
@@ -201,6 +200,7 @@ export class App {
     this.dirty = false;
     this.contentDirty = false;
     this.setTool('select');
+    this.applyBackground();
     this.cameraChanged(true);
     this.renderer.markScene();
     this.view = 'board';
@@ -222,22 +222,43 @@ export class App {
   }
 
   // ---------- камера ----------
+  // Жесты (перо, трекпад, колесо) приходят десятки раз в секунду. Здесь только меняется камера,
+  // а всё остальное (интерфейс, сохранение, редактор текста) выполняется один раз за кадр в flushCamera.
   panBy(dx, dy) {
     this.cam.panBy(dx, dy);
-    this.cameraChanged();
+    this.cameraMoved();
   }
 
   zoomAt(sx, sy, f) {
     this.cam.zoomAt(sx, sy, f);
-    this.cameraChanged();
+    this.cameraMoved();
   }
 
   zoomBy(f) { this.zoomAt(this.cam.w / 2, this.cam.h / 2, f); }
 
-  cameraChanged(immediate) {
+  cameraMoved() {
+    this.camPending = true;
     this.renderer.markCamera();
-    if (this.toolName === 'pen' || this.toolName === 'hl') this.input.updateCursor();
-    this.applyBackground();
+  }
+
+  flushCamera() {
+    if (!this.camPending) return;
+    this.camPending = false;
+    this.afterCamera(false);
+  }
+
+  // Синхронный вариант для программных переходов (к содержимому, из мини-карты, из тестов)
+  cameraChanged(immediate) {
+    this.camPending = false;
+    this.renderer.markCamera();
+    this.afterCamera(!!immediate);
+  }
+
+  afterCamera(immediate) {
+    if (this.cam.z !== this._lastZ) {
+      this._lastZ = this.cam.z;
+      if (this.toolName === 'pen' || this.toolName === 'hl') this.input.updateCursor();
+    }
     this.textEditor.position();
     this.ui.cameraChanged();
     if (this.meta && !immediate) { this.dirty = true; this.saveCamSoon(); }
@@ -265,7 +286,6 @@ export class App {
     this.origin.x += dx;
     this.origin.y += dy;
     if (this.hoverPos) { this.hoverPos.wx -= dx; this.hoverPos.wy -= dy; }
-    this.renderer.cacheCam = null;
     this.renderer.markScene();
     this.applyBackground();
     this.textEditor.position();
@@ -274,7 +294,10 @@ export class App {
     return true;
   }
 
-  afterInteraction() { this.rebaseIfNeeded(); }
+  afterInteraction() {
+    this.ui.panelDirty = true;
+    this.rebaseIfNeeded();
+  }
 
   fitContent() {
     const objs = this.scene.all();
@@ -295,23 +318,25 @@ export class App {
     this.cameraChanged();
   }
 
+  boardStyle() { return this.boardBg || this.settings.bg; }
+
+  // Цвет точек, сетки или клетки; рисуются в холсте сцены (см. Renderer.drawBackground)
+  gridColor(style) {
+    const line = this.boardLineColor;
+    if (line) return hexToRgba(line, style === 'dots' ? 0.6 : 0.4);
+    if (this.dark) return 'rgba(255, 255, 255, 0.22)';
+    if (style === 'cells') return 'rgba(75, 110, 210, 0.28)';
+    return style === 'dots' ? 'rgba(60, 70, 90, 0.30)' : 'rgba(60, 70, 90, 0.18)';
+  }
+
   applyBackground() {
     const st = this.stage.style;
-    const cam = this.cam;
-    let step = 24 * cam.z;
-    while (step < 14) step *= 2;
-    st.setProperty('--gs', step + 'px');
-    st.setProperty('--gx', ((-cam.x * cam.z) % step) + 'px');
-    st.setProperty('--gy', ((-cam.y * cam.z) % step) + 'px');
-    this.stage.dataset.bg = this.boardBg || this.settings.bg;
-    // свои цвета переопределяют значения из таблицы стилей; null возвращает стандартные
-    const bg = this.boardBgColor, line = this.boardLineColor;
-    if (bg) st.setProperty('--board', bg); else st.removeProperty('--board');
-    if (line) {
-      const style = this.stage.dataset.bg;
-      st.setProperty('--dot', hexToRgba(line, style === 'dots' ? 0.6 : 0.4));
-    } else if (this.dark) st.setProperty('--dot', 'rgba(255, 255, 255, 0.22)');
-    else st.removeProperty('--dot');
+    const style = this.boardStyle();
+    this.stage.dataset.bg = style;
+    // свой цвет фона переопределяет значение из таблицы стилей; null возвращает стандартное
+    if (this.boardBgColor) st.setProperty('--board', this.boardBgColor); else st.removeProperty('--board');
+    const key = `${style}|${this.boardBgColor}|${this.boardLineColor}|${this.dark}`;
+    if (key !== this._bgKey) { this._bgKey = key; this.renderer.markScene(); }
   }
 
   applyTheme() {

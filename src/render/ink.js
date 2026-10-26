@@ -1,9 +1,10 @@
-import { buildOutline, buildPolyline, predictPoints } from './stroke.js';
+import { buildOutline, buildPolyline, predictTip } from './stroke.js';
 
 // Живой слой чернил. Два прозрачных холста над сценой:
 //  base: уже «замороженная» часть штриха (дорисовывается порциями и больше не трогается);
-//  tail: хвост с предсказанием, очищается и перерисовывается каждый кадр в небольшом прямоугольнике.
-// Благодаря этому работа на кадр пропорциональна длине хвоста, а не всего штриха.
+//  tail: хвост, очищается и перерисовывается в небольшом прямоугольнике.
+// Предсказанный кончик рисуется отдельным коротким отрезком ПОВЕРХ настоящей линии и не участвует в расчёте её
+// формы, поэтому линия не «дрожит» от того, что предсказание меняется от кадра к кадру.
 const FREEZE_AT = 140;
 const KEEP = 36;
 const OVERLAP = 3;
@@ -22,8 +23,7 @@ export class InkLayer {
     this.base = this.baseCv.getContext('2d', opts);
     this.tail = this.tailCv.getContext('2d', opts);
     this.sb = null;
-    this.px = [0, 0, 0];
-    this.py = [0, 0, 0];
+    this.tip = { x: 0, y: 0 };
     this.prev = null;
   }
 
@@ -85,8 +85,8 @@ export class InkLayer {
     }
   }
 
-  // Один кадр. predicted: массив {x,y} из событий браузера или null (тогда считаем сами).
-  frame(predicted, predictMs) {
+  // Один проход отрисовки. predictMs: горизонт предсказания в мс (0 выключает)
+  frame(predictMs) {
     const sb = this.sb;
     if (!sb || !sb.length) return;
     const n = sb.length;
@@ -97,26 +97,22 @@ export class InkLayer {
       this.frozenTo = newF;
     }
     const a = style.hl ? 0 : Math.max(0, this.frozenTo - OVERLAP);
+    const tip = predictMs > 0 && predictTip(sb.X, sb.Y, sb.T, predictMs, this.cam.z, this.tip) ? this.tip : null;
 
-    // предсказанные точки временно дописываются в конец массивов
-    let pc = 0;
-    const lastR = sb.R[n - 1];
-    if (predicted && predicted.length) {
-      for (const p of predicted) { sb.X.push(p.x); sb.Y.push(p.y); sb.R.push(lastR); pc++; }
-    } else if (predictMs > 0) {
-      const c = predictPoints(sb.X, sb.Y, sb.T, predictMs, this.cam.z, this.px, this.py);
-      for (let i = 0; i < c; i++) { sb.X.push(this.px[i]); sb.Y.push(this.py[i]); sb.R.push(lastR); pc++; }
-    }
-    const b = n + pc - 1;
-
-    // прямоугольник, который затрагивает хвост
+    // прямоугольник, который затрагивает хвост (вместе с предсказанным кончиком)
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity, rm = 0;
-    for (let i = a; i <= b; i++) {
+    for (let i = a; i < n; i++) {
       if (sb.X[i] < x0) x0 = sb.X[i];
       if (sb.X[i] > x1) x1 = sb.X[i];
       if (sb.Y[i] < y0) y0 = sb.Y[i];
       if (sb.Y[i] > y1) y1 = sb.Y[i];
       if (sb.R[i] > rm) rm = sb.R[i];
+    }
+    if (tip) {
+      if (tip.x < x0) x0 = tip.x;
+      if (tip.x > x1) x1 = tip.x;
+      if (tip.y < y0) y0 = tip.y;
+      if (tip.y > y1) y1 = tip.y;
     }
     const pad = (style.hl ? style.size : rm * 1.6) + 3 / this.cam.z;
     const rect = { x0: x0 - pad, y0: y0 - pad, x1: x1 + pad, y1: y1 + pad };
@@ -127,8 +123,15 @@ export class InkLayer {
     ctx.clearRect(c.x0, c.y0, c.x1 - c.x0, c.y1 - c.y0);
     this.prev = rect;
 
-    this.drawPart(ctx, sb, a, b);
+    this.drawPart(ctx, sb, a, n - 1);
 
-    if (pc) { sb.X.length = n; sb.Y.length = n; sb.R.length = n; }
+    if (tip) {
+      ctx.lineWidth = style.variable ? sb.R[n - 1] * 2 : style.size;
+      ctx.beginPath();
+      ctx.moveTo(sb.X[n - 1], sb.Y[n - 1]);
+      ctx.lineTo(tip.x, tip.y);
+      ctx.stroke();
+      ctx.lineWidth = style.size;
+    }
   }
 }

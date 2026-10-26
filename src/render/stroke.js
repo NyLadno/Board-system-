@@ -30,7 +30,7 @@ class OneEuro {
 
 // Накопитель точек живого штриха. Вызывается на каждое событие пера, поэтому без лишних аллокаций.
 export class StrokeBuilder {
-  constructor({ size, sens = 0, smoothing = 0, zoom = 1, minDist = 0.4 }) {
+  constructor({ size, sens = 0, smoothing = 0, zoom = 1, minDist = 0.8 }) {
     this.size = size;
     this.sens = sens;
     this.smoothing = smoothing;
@@ -52,9 +52,10 @@ export class StrokeBuilder {
     const n = this.X.length;
     if (this.smoothing > 0) {
       const z = this.zoom;
-      const minCut = 8 - 7.4 * this.smoothing;
-      x = this.fx.filter(x * z, t, minCut, 0.04) / z;
-      y = this.fy.filter(y * z, t, minCut, 0.04) / z;
+      // s=0 фильтр выключен; чем больше s, тем сильнее гасится дрожь на малой скорости. Отставание на скорости остаётся малым.
+      const minCut = 14 - 12.2 * this.smoothing;
+      x = this.fx.filter(x * z, t, minCut, 0.045) / z;
+      y = this.fy.filter(y * z, t, minCut, 0.045) / z;
     }
     if (n > 0) {
       const dx = x - this.X[n - 1];
@@ -66,7 +67,7 @@ export class StrokeBuilder {
     let r = radiusFor(this.size, p, this.sens);
     if (n > 0) {
       const pr = this.R[n - 1];
-      r = pr + (r - pr) * 0.55;
+      r = pr + (r - pr) * 0.35;
     }
     this.X.push(x);
     this.Y.push(y);
@@ -98,31 +99,36 @@ export class StrokeBuilder {
   isVariable() { return this.sens > 0 && this.pmax - this.pmin > 0.04; }
 }
 
-// Предсказание положения пера вперёд на horizonMs мс. Возвращает число добавленных точек.
-// Использует скорость и ограниченное ускорение по трём последним точкам; на резких поворотах и при малой скорости молчит.
-export function predictPoints(X, Y, T, horizonMs, zoom, outX, outY, steps = 3) {
+// Предсказание кончика пера на horizonMs вперёд. Возвращает true и заполняет out.x/out.y.
+// Главное требование устойчивость: скорость берётся из окна не короче ~14 мс (а не из двух соседних точек, чьи
+// отметки времени шумят), ускорение не используется, на малой скорости и на резких поворотах предсказания нет,
+// а величина плавно растёт со скоростью. Иначе кончик дёргается от кадра к кадру.
+export function predictTip(X, Y, T, horizonMs, zoom, out) {
   const k = X.length - 1;
-  if (k < 2 || horizonMs <= 0) return 0;
-  const dt1 = T[k] - T[k - 1];
-  const dt0 = T[k - 1] - T[k - 2];
-  if (dt1 <= 0.5 || dt0 <= 0.5) return 0;
-  const vx1 = (X[k] - X[k - 1]) / dt1, vy1 = (Y[k] - Y[k - 1]) / dt1;
-  const vx0 = (X[k - 1] - X[k - 2]) / dt0, vy0 = (Y[k - 1] - Y[k - 2]) / dt0;
-  const s1 = Math.hypot(vx1, vy1);
-  const s0 = Math.hypot(vx0, vy0);
-  if (s1 * 1000 * zoom < 60) return 0;
-  if (s0 > 0 && (vx1 * vx0 + vy1 * vy0) / (s1 * s0) < 0.55) return 0;
-  const adt = (dt0 + dt1) / 2;
-  let ax = (vx1 - vx0) / adt, ay = (vy1 - vy0) / adt;
-  const amax = (s1 / horizonMs) * 0.8;
-  const al = Math.hypot(ax, ay);
-  if (al > amax) { ax *= amax / al; ay *= amax / al; }
-  for (let i = 1; i <= steps; i++) {
-    const t = (horizonMs * i) / steps;
-    outX[i - 1] = X[k] + vx1 * t + 0.25 * ax * t * t;
-    outY[i - 1] = Y[k] + vy1 * t + 0.25 * ay * t * t;
+  if (k < 3 || horizonMs <= 0) return false;
+  let j = k - 1;
+  while (j > 0 && T[k] - T[j] < 14 && k - j < 7) j--;
+  const dt = T[k] - T[j];
+  if (dt < 6) return false;
+  const vx = (X[k] - X[j]) / dt, vy = (Y[k] - Y[j]) / dt; // единиц мира в мс
+  const speed = Math.hypot(vx, vy) * 1000 * zoom; // пикселей экрана в секунду
+  if (speed < 120) return false;
+  // направление не должно резко меняться относительно предыдущего окна
+  let j2 = j;
+  while (j2 > 0 && T[j] - T[j2] < 14 && j - j2 < 7) j2--;
+  if (T[j] - T[j2] >= 6) {
+    const ux = (X[j] - X[j2]) / (T[j] - T[j2]), uy = (Y[j] - Y[j2]) / (T[j] - T[j2]);
+    const um = Math.hypot(ux, uy);
+    if (um > 0 && (vx * ux + vy * uy) / (Math.hypot(vx, vy) * um) < 0.8) return false;
   }
-  return steps;
+  const ramp = Math.min(1, (speed - 120) / 300);
+  let dx = vx * horizonMs * ramp, dy = vy * horizonMs * ramp;
+  const maxLen = 26 / zoom;
+  const len = Math.hypot(dx, dy);
+  if (len > maxLen) { dx *= maxLen / len; dy *= maxLen / len; }
+  out.x = X[k] + dx;
+  out.y = Y[k] + dy;
+  return true;
 }
 
 // Сглаженная ломаная постоянной толщины: квадратичные кривые через середины звеньев
@@ -150,23 +156,24 @@ export function buildOutline(path, X, Y, R, a, b) {
   }
   const LX = new Array(n), LY = new Array(n), RX = new Array(n), RY = new Array(n);
   let nx = 0, ny = -1;
+  let nxS = 0, nyS = -1, nxE = 0, nyE = -1;
   for (let i = 0; i < n; i++) {
     const j = a + i;
-    const i0 = i > 0 ? j - 1 : j;
-    const i1 = i < n - 1 ? j + 1 : j;
-    const dx = X[i1] - X[i0], dy = Y[i1] - Y[i0];
+    // касательная по взвешенному окну из пяти точек: убирает «пилу» от шума на малых шагах
+    const p1 = Math.min(b, j + 1), m1 = Math.max(a, j - 1), p2 = Math.min(b, j + 2), m2 = Math.max(a, j - 2);
+    const dx = X[p1] - X[m1] + 0.5 * (X[p2] - X[m2]);
+    const dy = Y[p1] - Y[m1] + 0.5 * (Y[p2] - Y[m2]);
     const l = Math.hypot(dx, dy);
     if (l > 1e-6) { nx = -dy / l; ny = dx / l; }
+    if (i === 0) { nxS = nx; nyS = ny; }
+    if (i === n - 1) { nxE = nx; nyE = ny; }
     const r = R[j];
     LX[i] = X[j] + nx * r; LY[i] = Y[j] + ny * r;
     RX[i] = X[j] - nx * r; RY[i] = Y[j] - ny * r;
   }
-  // нормали на концах для дуг
   const s = a, e = b;
-  const sdx = X[a + 1] - X[a], sdy = Y[a + 1] - Y[a];
-  const edx = X[e] - X[e - 1], edy = Y[e] - Y[e - 1];
-  const thS = Math.atan2(sdy, sdx) + Math.PI / 2;
-  const thE = Math.atan2(edy, edx) + Math.PI / 2;
+  const thS = Math.atan2(nyS, nxS);
+  const thE = Math.atan2(nyE, nxE);
 
   path.moveTo(LX[0], LY[0]);
   if (n > 2) {

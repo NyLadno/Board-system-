@@ -21,6 +21,7 @@ export class Input {
 
     stage.addEventListener('pointerdown', (e) => this.onDown(e));
     stage.addEventListener('pointermove', (e) => this.onMove(e));
+    stage.addEventListener('pointerrawupdate', (e) => { const a = this.active; if (a && a.id === e.pointerId && a.tool.raw) a.tool.raw(e); });
     stage.addEventListener('pointerup', (e) => this.onUp(e));
     stage.addEventListener('pointercancel', (e) => this.onUp(e));
     stage.addEventListener('lostpointercapture', (e) => { if (this.active && this.active.id === e.pointerId) this.onUp(e); });
@@ -119,7 +120,6 @@ export class Input {
         ev.predicted = e.getPredictedEvents ? e.getPredictedEvents() : null;
       } else if (a.tool.name === 'pen' || a.tool.name === 'hl' || a.tool.name === 'eraser') {
         ev.coalesced = e.getCoalescedEvents ? e.getCoalescedEvents() : null;
-        ev.predicted = a.tool.name === 'eraser' ? null : (e.getPredictedEvents ? e.getPredictedEvents() : null);
       }
       a.tool.move?.(ev);
       return;

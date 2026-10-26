@@ -12,9 +12,8 @@ export class PenTool {
     this.kind = kind; // 'pen' | 'hl'
     this.name = kind;
     this.sb = null;
-    this.pred = [];
-    this.predPool = [{ x: 0, y: 0 }, { x: 0, y: 0 }, { x: 0, y: 0 }, { x: 0, y: 0 }];
     this.pid = null;
+    this.lastT = -1;
   }
 
   get cursor() { return this.app.brushCursor(this.kind); }
@@ -30,12 +29,16 @@ export class PenTool {
     this.pid = ev.id;
     this.rect = app.input.rect;
     app.renderer.ink.begin(this.sb, this.style, app.cam);
+    this.lastT = -1;
     this.addRaw(ev.raw);
-    this.pred = [];
+    this.drawNow();
     app.renderer.schedule();
   }
 
   addRaw(e) {
+    // события приходят и из pointerrawupdate, и позже в coalesced-списке pointermove: повторы отбрасываем по времени
+    if (e.timeStamp <= this.lastT) return;
+    this.lastT = e.timeStamp;
     const cam = this.app.cam;
     const x = (e.clientX - this.rect.left) / cam.z + cam.x;
     const y = (e.clientY - this.rect.top) / cam.z + cam.y;
@@ -45,38 +48,32 @@ export class PenTool {
     this.last = { x, y, p, t: e.timeStamp };
   }
 
+  // Событие пришло «сырым» (не выровненным по кадрам): добавляем точку и сразу рисуем,
+  // чтобы не ждать следующего кадра. Холст уйдёт на экран вместе с ближайшим кадром.
+  raw(e) {
+    if (!this.sb) return;
+    this.addRaw(e);
+    this.drawNow();
+  }
+
   move(ev) {
     if (!this.sb) return;
     const list = ev.coalesced && ev.coalesced.length ? ev.coalesced : [ev.raw];
     for (let i = 0; i < list.length; i++) this.addRaw(list[i]);
-    this.updatePrediction(ev);
+    this.drawNow();
     this.app.renderer.schedule();
   }
 
-  updatePrediction(ev) {
+  drawNow() {
     const app = this.app;
-    this.pred = [];
-    if (app.settings.predictMs <= 0 || !app.settings.browserPrediction) return;
-    const pe = ev.predicted;
-    if (!pe || !pe.length) return;
-    const cam = app.cam;
-    const n = Math.min(pe.length, this.predPool.length);
-    for (let i = 0; i < n; i++) {
-      const slot = this.predPool[i];
-      slot.x = (pe[i].clientX - this.rect.left) / cam.z + cam.x;
-      slot.y = (pe[i].clientY - this.rect.top) / cam.z + cam.y;
-      this.pred.push(slot);
-    }
-  }
-
-  inkFrame(t) {
-    const app = this.app;
-    app.renderer.ink.frame(this.pred, app.settings.predictMs);
+    app.renderer.ink.frame(app.settings.predictMs);
     if (this.last) {
       const d = performance.now() - this.last.t;
       app.diag.inputToDraw += (Math.max(0, d) - app.diag.inputToDraw) * 0.2;
     }
   }
+
+  inkFrame() { this.drawNow(); }
 
   up(ev) {
     const app = this.app;
@@ -112,7 +109,6 @@ export class PenTool {
       app.touched();
     }
     app.renderer.ink.end();
-    this.pred = [];
   }
 
   cancel() {

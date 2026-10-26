@@ -30,8 +30,7 @@ export class UI {
     this.toastEl = document.getElementById('toast');
     this.buildChrome();
     this.panel = new ContextPanel(app, this.chrome);
-    this.lastMini = 0;
-    this.miniDirty = true;
+    this.panelDirty = false;
   }
 
   // ---------- каркас доски ----------
@@ -128,13 +127,22 @@ export class UI {
 
   contentChanged() {
     this.panel.update();
-    this.miniDirty = true;
+    this.scheduleMini();
   }
 
+  // Вызывается раз за кадр, пока камера двигается
   cameraChanged() {
-    this.zoomLabel.textContent = Math.round(this.app.cam.z * 100) + '%';
-    this.miniDirty = true;
+    const label = Math.round(this.app.cam.z * 100) + '%';
+    if (this.zoomLabel.textContent !== label) this.zoomLabel.textContent = label;
+    this.panelDirty = true;
+    this.scheduleMini();
     closePopover();
+  }
+
+  // Мини-карта перерисовывается, когда всё успокоилось: так она не отнимает время у жестов и рисования
+  scheduleMini() {
+    clearTimeout(this._mt);
+    this._mt = setTimeout(() => this.drawMinimap(), 180);
   }
 
   updateHistory() {
@@ -149,28 +157,25 @@ export class UI {
       if (this.app.meta) this.nameInput.value = this.app.meta.name;
     } else this.buildOptions();
     this.panel.update(true);
-    this.miniDirty = true;
+    this.scheduleMini();
   }
 
-  // Вызывается каждый кадр рендера
+  // Вызывается каждый кадр рендера: только дешёвые проверки
   frame() {
     const app = this.app;
     if (app.view !== 'board') return;
-    if (!app.interacting || app.toolName === 'select') {
+    if (this.panelDirty) {
+      this.panelDirty = false;
       if (!this.panel.el.hidden) this.panel.position(app.selectedObjs());
-    }
-    const now = performance.now();
-    if (this.miniDirty && now - this.lastMini > 120) {
-      this.lastMini = now;
-      this.miniDirty = false;
-      this.drawMinimap();
     }
     if (app.settings.diag) {
       const r = app.renderer.stats;
-      this.diagEl.hidden = false;
-      this.diagEl.textContent = `${r.fps} fps · scene ${r.cost.toFixed(1)} ms · ${t('latency')} ${app.diag.inputToDraw.toFixed(1)} ms · ${app.scene.objs.size} obj`;
-    } else this.diagEl.hidden = true;
-    this.mini.hidden = !app.settings.minimap;
+      const text = `${r.fps} fps · scene ${r.cost.toFixed(1)} ms (${r.renders}) · ${t('latency')} ${app.diag.inputToDraw.toFixed(1)} ms · ${app.scene.objs.size} obj`;
+      if (this.diagEl.hidden) this.diagEl.hidden = false;
+      if (text !== this._diagText) { this._diagText = text; this.diagEl.textContent = text; }
+    } else if (!this.diagEl.hidden) this.diagEl.hidden = true;
+    const showMini = !!app.settings.minimap;
+    if (this.mini.hidden === showMini) this.mini.hidden = !showMini;
   }
 
   // ---------- параметры инструмента ----------
@@ -201,7 +206,7 @@ export class UI {
           const on = app.settings.pressure > 0;
           const p = h('button', { class: 'tb wide' + (on ? ' on' : ''), title: t('pressure') }, 'Pressure');
           p.textContent = '✎ ' + (getLang() === 'ru' ? 'Нажим' : 'Pressure');
-          p.addEventListener('click', () => { app.settings.pressure = on ? 0 : 0.8; app.saveSettings(); });
+          p.addEventListener('click', () => { app.settings.pressure = on ? 0 : 0.65; app.saveSettings(); });
           el.append(h('span', { class: 'sep' }), p);
         }
       } else {
@@ -517,7 +522,6 @@ export class UI {
       row(t('pressure'), num('pressure', 0, 100, 5, 100)),
       row(t('smoothing'), num('smoothing', 0, 100, 5, 100), t('smoothingHint')),
       row(t('prediction'), num('predictMs', 0, 40, 1), t('predictionHint')),
-      row(t('browserPrediction'), toggle('browserPrediction')),
       row(t('palm'), toggle('palmRejection')),
       row(t('touchDraw'), toggle('touchDraw')),
       h('h3', null, t('background')),

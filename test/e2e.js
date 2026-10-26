@@ -100,7 +100,7 @@ async function step(name, fn) {
     const o = (await B(() => window.__board.scene.all().filter((x) => x.type === 'stroke').map((x) => ({ n: x.pts.length / 3, v: x.s.var, r0: x.pts[2], r1: x.pts[x.pts.length - 1] }))))[0];
     assert.ok(o.n > 30, 'points ' + o.n);
     assert.equal(o.v, true);
-    assert.ok(o.r1 > o.r0 * 1.8, `radius should grow with pressure: ${o.r0} -> ${o.r1}`);
+    assert.ok(o.r1 > o.r0 * 1.35, `radius should grow with pressure: ${o.r0} -> ${o.r1}`);
   });
 
   await step('ластик удаляет штрих, отмена возвращает', async () => {
@@ -249,7 +249,7 @@ async function step(name, fn) {
     await page.waitForTimeout(400);
     const img = (await objs()).find((o) => o.type === 'image');
     assert.ok(img && img.w > 0);
-    const px = await B(() => { const c = window.__board.renderer.sceneCv; const g = c.getContext('2d'); const cam = window.__board.cam; const [sx, sy] = cam.toScreen(100, 200); const d = g.getImageData(Math.round((sx - 40) * 2), Math.round((sy) * 2), 1, 1).data; return Array.from(d); });
+    const px = await B(() => { const a = window.__board; a.renderer.renderScene(); const [sx, sy] = a.cam.toScreen(100, 200); return Array.from(a.renderer.readPixels(sx - 40, sy, 1, 1).data); });
     assert.ok(px[3] > 200, 'image pixel alpha ' + px);
   });
 
@@ -299,7 +299,7 @@ async function step(name, fn) {
     const far = await B(() => window.__board.scene.all().filter((o) => o.type === 'stroke').pop());
     assert.ok(Math.abs(far.x) < 5000 && Math.abs(far.y) < 5000, `штрих в локальных координатах: ${far.x},${far.y}`);
     // нарисованное вдали видно: на холсте есть тёмные пиксели возле линии
-    const dark = await B(() => { const g = window.__board.renderer.sceneCv.getContext('2d'); const d = g.getImageData(1300, 760, 120, 120).data; let n = 0; for (let i = 3; i < d.length; i += 4) if (d[i] > 200) n++; return n; });
+    const dark = await B(() => { const a = window.__board; a.renderer.renderScene(); const d = a.renderer.readPixels(650, 380, 60, 60).data; let n = 0; for (let i = 3; i < d.length; i += 4) if (d[i] > 200) n++; return n; });
     assert.ok(dark > 50, 'штрих отрисован, пикселей: ' + dark);
     // возвращаемся к стикеру: он на месте с учётом накопленного сдвига
     await B(() => { const a = window.__board; a.cam.x += -1e8; a.cam.y += 3e7; a.cameraChanged(); });
@@ -313,6 +313,58 @@ async function step(name, fn) {
     await B(() => { const a = window.__board; for (let i = 0; i < 60; i++) a.zoomBy(2); });
     assert.equal(await B(() => window.__board.cam.z), 32);
     await B(() => window.__board.fitContent());
+  });
+
+  await step('панорамирование: сдвиг готового слоя без перерисовки, пиксель в пиксель', async () => {
+    const info = await B(async () => {
+      const a = window.__board, r = a.renderer;
+      const { makeShape, makeSticky } = await import('/core/scene.js');
+      for (let i = 0; i < 12; i++) { const sh = makeShape(i % 2 ? 'ellipse' : 'rect', (i % 4) * 220 - 400, Math.floor(i / 4) * 160 - 250, 160, 100); sh.text = 'Ф' + i; a.scene.add(sh, true); }
+      const st = makeSticky(-300, 300); st.text = 'Стикер'; a.scene.add(st, true);
+      a.scene.emit('load');
+      a.cam.z = 1; a.cam.x = -720; a.cam.y = -450; a.cameraChanged(true);
+      r.renderScene();
+      await new Promise((res) => requestAnimationFrame(() => requestAnimationFrame(res))); // дать отработать отложенным перерисовкам
+      return { renders: r.stats.renders, margin: r.margin };
+    });
+    // небольшой сдвиг жестом: холст не перерисовывается, а смещается
+    const shifted = await B(async () => {
+      const a = window.__board, r = a.renderer;
+      const before = r.stats.renders;
+      a.panBy(-120, -70);
+      await new Promise((res) => requestAnimationFrame(() => requestAnimationFrame(res)));
+      const moved = { renders: r.stats.renders - before, transform: r.sceneCv.style.transform, tx: r.xf.tx, ty: r.xf.ty };
+      const quick = r.readPixels(0, 0, 1440, 900).data;
+      r.renderScene();
+      const fresh = r.readPixels(0, 0, 1440, 900).data;
+      let diff = 0;
+      for (let i = 0; i < quick.length; i++) if (quick[i] !== fresh[i]) diff++;
+      return { moved, diff: diff / quick.length };
+    });
+    assert.equal(shifted.moved.renders, 0, 'перерисовки не было: ' + JSON.stringify(shifted.moved));
+    assert.ok(shifted.moved.transform.includes('translate3d(-120px, -70px'), shifted.moved.transform);
+    assert.ok(shifted.diff < 0.002, 'сдвинутый слой совпадает с перерисованным: ' + shifted.diff);
+    // большой сдвиг: запас по краям кончился, слой перерисован под новую камеру
+    const far = await B(async () => {
+      const a = window.__board, r = a.renderer;
+      a.panBy(-900, 0);
+      await new Promise((res) => requestAnimationFrame(() => requestAnimationFrame(res)));
+      return { rx: r.R.x, cx: a.cam.x, tr: r.sceneCv.style.transform };
+    });
+    assert.equal(far.rx, far.cx);
+    assert.equal(far.tr, '');
+    // зум: сначала масштаб слоя, потом чёткая перерисовка
+    const z = await B(async () => {
+      const a = window.__board, r = a.renderer;
+      a.zoomAt(700, 400, 1.3);
+      await new Promise((res) => requestAnimationFrame(() => requestAnimationFrame(res)));
+      const during = { scaled: r.sceneCv.style.transform.includes('scale('), same: r.R.z === a.cam.z };
+      await new Promise((res) => setTimeout(res, 350));
+      return { during, after: { tr: r.sceneCv.style.transform, same: r.R.z === a.cam.z } };
+    });
+    assert.ok(z.during.scaled && !z.during.same, JSON.stringify(z));
+    assert.ok(z.after.same && z.after.tr === '', JSON.stringify(z));
+    await page.screenshot({ path: path.join(OUT, 'pan.png') });
   });
 
   await step('колесо: масштаб вокруг курсора и панорамирование трекпадом', async () => {
@@ -373,7 +425,7 @@ async function step(name, fn) {
   await step('вид доски: цвет фона и цвет линий меняются отдельно, сохраняются и попадают в экспорт', async () => {
     await (await page.$$('.card:not(.new)'))[0].click();
     await page.waitForTimeout(400);
-    const css = () => B(() => { const st = document.getElementById('stage'); return { bg: getComputedStyle(st).backgroundColor, dot: st.style.getPropertyValue('--dot'), style: st.dataset.bg }; });
+    const css = () => B(() => { const st = document.getElementById('stage'); return { bg: getComputedStyle(st).backgroundColor, dot: window.__board.gridColor(st.dataset.bg), style: st.dataset.bg }; });
     const base = await css();
     await page.click('.bg-btn');
     await page.click('.look .swatches >> nth=0 >> .sw[title="#fff8e1"]');
@@ -410,7 +462,7 @@ async function step(name, fn) {
     await page.click('.bg-btn');
     await page.click('.look .reset');
     c = await css();
-    assert.equal(c.dot, '');
+    assert.ok(/60, 70, 90/.test(c.dot), c.dot);
     assert.notEqual(c.bg, 'rgb(255, 248, 225)');
     await page.keyboard.press('Escape');
     await home();
@@ -419,7 +471,7 @@ async function step(name, fn) {
   await step('цветовые схемы доски и авто-цвет пера', async () => {
     await (await page.$$('.card:not(.new)'))[0].click();
     await page.waitForTimeout(400);
-    const st = () => B(() => { const a = window.__board; return { pen: a.defaults.pen.color, text: a.defaults.textColor, dark: a.dark, bg: getComputedStyle(document.getElementById('stage')).backgroundColor, dot: document.getElementById('stage').style.getPropertyValue('--dot') }; });
+    const st = () => B(() => { const a = window.__board; return { pen: a.defaults.pen.color, text: a.defaults.textColor, dark: a.dark, bg: getComputedStyle(document.getElementById('stage')).backgroundColor, dot: window.__board.gridColor(window.__board.boardStyle()) }; });
     assert.equal((await st()).pen, '#1a1a1a');
     await page.click('.bg-btn');
     await page.click('.look-chip[data-look="chalk"]');
@@ -450,7 +502,7 @@ async function step(name, fn) {
     assert.equal(await B(() => document.getElementById('stage').dataset.bg), 'grid');
     await page.click('.look-chip[data-look="default"]');
     c = await st();
-    assert.equal(c.dot, '');
+    assert.ok(/60, 70, 90/.test(c.dot), c.dot);
     await B(() => { window.__board.defaults.pen.color = '#1a1a1a'; });
     await page.keyboard.press('Escape');
     await home();
