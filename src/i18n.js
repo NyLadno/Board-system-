@@ -82,6 +82,12 @@ const RU = {
   theme: 'Тема',
   themeAuto: 'Системная', themeLight: 'Светлая', themeDark: 'Тёмная',
   background: 'Фон доски',
+  bgCells: 'Клетка',
+  look: 'Вид доски',
+  bgStyle: 'Стиль фона',
+  bgColor: 'Цвет фона',
+  lineColor: 'Цвет линий',
+  resetLook: 'Сбросить',
   bgDots: 'Точки', bgGrid: 'Сетка', bgNone: 'Чистый',
   wheel: 'Колесо мыши',
   wheelZoom: 'Масштабирует', wheelPan: 'Прокручивает',
@@ -202,6 +208,12 @@ const EN = {
   theme: 'Theme',
   themeAuto: 'System', themeLight: 'Light', themeDark: 'Dark',
   background: 'Board background',
+  bgCells: 'Squared',
+  look: 'Board look',
+  bgStyle: 'Background style',
+  bgColor: 'Background color',
+  lineColor: 'Line color',
+  resetLook: 'Reset',
   bgDots: 'Dots', bgGrid: 'Grid', bgNone: 'Plain',
   wheel: 'Mouse wheel',
   wheelZoom: 'Zooms', wheelPan: 'Scrolls',
@@ -239,6 +251,7 @@ const EN = {
 };
 
 const dicts = { ru: RU, en: EN };
+export const DICTS = dicts;
 let lang = 'ru';
 
 export function setLang(l) { lang = dicts[l] ? l : 'en'; }

@@ -39,6 +39,7 @@ const P = {
   dashed: '<path d="M4 12h3M10.5 12h3M17 12h3"/>',
   dotted: '<path d="M4 12h.1M8 12h.1M12 12h.1M16 12h.1M20 12h.1" stroke-width="3"/>',
   solid: '<path d="M4 12h16"/>',
+  palette: '<path d="M12 3a9 9 0 100 18c1.4 0 2-1 1.6-2-.5-1.3.3-2.5 1.7-2.5H17a4 4 0 004-4c0-5-4-9.5-9-9.5z"/><circle cx="7.5" cy="11" r="1.1"/><circle cx="10" cy="7" r="1.1"/><circle cx="14.5" cy="7" r="1.1"/>',
   more: '<circle cx="5" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="19" cy="12" r="1.3"/>',
   line: '<path d="M5 19L19 5"/>',
   check: '<path d="M5 12l4.5 4.5L19 7"/>',

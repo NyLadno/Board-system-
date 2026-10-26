@@ -124,7 +124,7 @@ export async function exportSVGParts(app, objs, size) {
   for (const o of [...objs].sort((a, c) => a.z - c.z)) parts.push(await objSvg(app, o));
   const k = size ? Math.min(1, size / Math.max(w, h)) : 1;
   const svg = `<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" viewBox="${x} ${y} ${w} ${h}" width="${f(w * k)}" height="${f(h * k)}">` +
-    `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="#ffffff"/>${parts.join('')}</svg>`;
+    `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${app.boardBgColor || '#ffffff'}"/>${parts.join('')}</svg>`;
   return { svg, w: f(w * k), h: f(h * k) };
 }
 
@@ -143,7 +143,7 @@ export async function exportPDFBytes(app, objs) {
   const pad = 24;
   const rect = { x: b.x - pad, y: b.y - pad, w: b.w + pad * 2, h: b.h + pad * 2 };
   const scale = Math.min(2, 8000 / Math.max(rect.w, rect.h));
-  const cv = app.renderer.renderToCanvas([...objs].sort((a, c) => a.z - c.z), rect, scale, { background: '#ffffff' });
+  const cv = app.renderer.renderToCanvas([...objs].sort((a, c) => a.z - c.z), rect, scale, { background: app.boardBgColor || '#ffffff' });
   const jpeg = await new Promise((res) => cv.toBlob(res, 'image/jpeg', 0.92));
   const { jpegToPdf } = await import('./pdf.js');
   return jpegToPdf(new Uint8Array(await jpeg.arrayBuffer()), cv.width / scale, cv.height / scale);
@@ -154,7 +154,7 @@ export function exportPNGBlob(app, objs) {
   const pad = 24;
   const rect = { x: b.x - pad, y: b.y - pad, w: b.w + pad * 2, h: b.h + pad * 2 };
   const scale = Math.min(2, 8192 / Math.max(rect.w, rect.h));
-  const cv = app.renderer.renderToCanvas([...objs].sort((a, c) => a.z - c.z), rect, scale, { background: '#ffffff' });
+  const cv = app.renderer.renderToCanvas([...objs].sort((a, c) => a.z - c.z), rect, scale, { background: app.boardBgColor || '#ffffff' });
   return new Promise((res) => cv.toBlob(res, 'image/png'));
 }
 
@@ -166,7 +166,7 @@ export async function exportBoardJSON(app) {
       try { assets[o.assetId] = await blobToDataURL(await app.storage.getAssetBlob(o.assetId)); } catch { /* пропущено */ }
     }
   }
-  return JSON.stringify({ app: 'board-system', v: 1, name: app.meta.name, objects, assets, camera: app.cam.toJSON(), bg: app.boardBg });
+  return JSON.stringify({ app: 'board-system', v: 1, name: app.meta.name, objects, assets, camera: app.cam.toJSON(), bg: app.boardBg, bgColor: app.boardBgColor, lineColor: app.boardLineColor });
 }
 
 const TYPES = new Set(['stroke', 'shape', 'sticky', 'text', 'frame', 'image', 'connector']);
@@ -180,5 +180,6 @@ export function parseBoardJSON(text) {
     for (const [k, v] of Object.entries(d.assets)) if (typeof v === 'string' && v.startsWith('data:image/')) assets[k] = v;
   }
   const bg = ['dots', 'grid', 'cells', 'none'].includes(d.bg) ? d.bg : null;
-  return { name: typeof d.name === 'string' ? d.name.slice(0, 120) : null, objects, assets, bg };
+  const hex = (v) => (typeof v === 'string' && /^#[0-9a-f]{6}$/i.test(v) ? v : null);
+  return { name: typeof d.name === 'string' ? d.name.slice(0, 120) : null, objects, assets, bg, bgColor: hex(d.bgColor), lineColor: hex(d.lineColor) };
 }

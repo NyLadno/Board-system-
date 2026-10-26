@@ -65,8 +65,10 @@ export class UI {
         h('button', { onclick: () => { closePopover(); app.importJSON(); } }, t('importJson')));
       popover(exportBtn, menu);
     });
+    const lookBtn = h('button', { class: 'tb bg-btn', title: t('look'), html: icon('palette', 18) });
+    lookBtn.addEventListener('click', () => this.openLook(lookBtn));
     this.topRight = h('div', { class: 'bar top-right' },
-      this.undoBtn, this.redoBtn, h('span', { class: 'sep' }), exportBtn,
+      this.undoBtn, this.redoBtn, h('span', { class: 'sep' }), lookBtn, exportBtn,
       h('button', { class: 'tb', title: t('settings'), html: icon('settings', 18), onclick: () => this.openSettings() }));
 
     // левая панель инструментов
@@ -289,6 +291,34 @@ export class UI {
     this.miniCv.addEventListener('pointerup', () => { this.miniDrag = false; });
   }
 
+  // ---------- вид доски: стиль фона, цвет фона, цвет линий ----------
+  openLook(anchor) {
+    const app = this.app;
+    const BG = ['#ffffff', '#f6f7f9', '#fff8e1', '#e8f5e9', '#e3f2fd', '#fce4ec', '#2b2f36', '#0f1424'];
+    const LINES = ['#9aa0a6', '#4262ff', '#2f9e44', '#e03131', '#f08c00', '#1a1a1a', '#ffffff'];
+    const styles = [['dots', t('bgDots')], ['grid', t('bgGrid')], ['cells', t('bgCells')], ['none', t('bgNone')]];
+    const box = h('div', { class: 'look' });
+    const build = () => {
+      box.textContent = '';
+      const cur = app.boardBg || app.settings.bg;
+      const seg = h('div', { class: 'seg' }, styles.map(([v, label]) => {
+        const b = h('button', { class: 'tb wide' + (cur === v ? ' on' : '') }, label);
+        b.addEventListener('click', () => { app.setBoardLook({ bg: v }); build(); });
+        return b;
+      }));
+      const defBg = getComputedStyle(app.stage).getPropertyValue('--board').trim();
+      box.append(
+        h('div', { class: 'lbl' }, t('bgStyle')), seg,
+        h('div', { class: 'lbl' }, t('bgColor')),
+        swatches(BG, app.boardBgColor || defBg, (c) => { app.setBoardLook({ bgColor: c }); build(); }),
+        h('div', { class: 'lbl' }, t('lineColor')),
+        swatches(LINES, app.boardLineColor || '', (c) => { app.setBoardLook({ lineColor: c }); build(); }),
+        h('button', { class: 'tb wide reset', onclick: () => { app.setBoardLook({ bgColor: null, lineColor: null }); build(); } }, t('resetLook')));
+    };
+    build();
+    popover(anchor, box);
+  }
+
   // ---------- сообщения ----------
   toast(msg) {
     this.toastEl.textContent = msg;
@@ -482,7 +512,7 @@ export class UI {
         // на открытой доске меняется фон этой доски, иначе значение по умолчанию для новых
         const cur = app.view === 'board' ? (app.boardBg || s.bg) : s.bg;
         const sel = h('select', null, [['dots', t('bgDots')], ['grid', t('bgGrid')], ['cells', t('bgCells')], ['none', t('bgNone')]].map(([v, label]) => h('option', { value: v, selected: cur === v }, label)));
-        sel.addEventListener('change', () => { if (app.view === 'board') app.setBoardBg(sel.value); else { s.bg = sel.value; app.saveSettings(); } });
+        sel.addEventListener('change', () => { if (app.view === 'board') app.setBoardLook({ bg: sel.value }); else { s.bg = sel.value; app.saveSettings(); } });
         return sel;
       })()),
       row(t('wheel'), select('wheel', [['zoom', t('wheelZoom')], ['pan', t('wheelPan')]])),

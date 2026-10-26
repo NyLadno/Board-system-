@@ -370,6 +370,52 @@ async function step(name, fn) {
     assert.ok(counts.some((n) => n > 5), 'одна из досок хранит объекты: ' + counts);
   });
 
+  await step('вид доски: цвет фона и цвет линий меняются отдельно, сохраняются и попадают в экспорт', async () => {
+    await (await page.$$('.card:not(.new)'))[0].click();
+    await page.waitForTimeout(400);
+    const css = () => B(() => { const st = document.getElementById('stage'); return { bg: getComputedStyle(st).backgroundColor, dot: st.style.getPropertyValue('--dot'), style: st.dataset.bg }; });
+    const base = await css();
+    await page.click('.bg-btn');
+    await page.click('.look .swatches >> nth=0 >> .sw[title="#fff8e1"]');
+    let c = await css();
+    assert.equal(c.bg, 'rgb(255, 248, 225)');
+    assert.equal(c.dot, base.dot, 'цвет линий не затронут');
+    await page.click('.look .swatches >> nth=1 >> .sw[title="#e03131"]');
+    c = await css();
+    assert.equal(c.bg, 'rgb(255, 248, 225)', 'цвет фона не затронут');
+    assert.ok(c.dot.startsWith('rgba(224, 49, 49'), c.dot);
+    await page.click('.look .seg button:nth-child(2)');
+    assert.equal((await css()).style, 'grid');
+    // экспорт использует цвет фона доски
+    const px = await B(async () => {
+      const a = window.__board;
+      if (!a.scene.all().length) { const m = await import('/core/scene.js'); a.scene.add(m.makeShape('rect', 0, 0, 100, 60)); }
+      const m = await import('/export.js');
+      const bmp = await createImageBitmap(await m.exportPNGBlob(a, a.scene.all()));
+      const cv = document.createElement('canvas'); cv.width = bmp.width; cv.height = bmp.height;
+      const g = cv.getContext('2d'); g.drawImage(bmp, 0, 0);
+      return Array.from(g.getImageData(2, 2, 1, 1).data);
+    });
+    assert.deepEqual(px.slice(0, 3), [255, 248, 225]);
+    await page.waitForTimeout(1200);
+    await page.reload();
+    await page.waitForTimeout(500);
+    await (await page.$$('.card:not(.new)'))[0].click();
+    await page.waitForTimeout(450);
+    c = await css();
+    assert.equal(c.bg, 'rgb(255, 248, 225)');
+    assert.ok(c.dot.startsWith('rgba(224, 49, 49') && c.style === 'grid', JSON.stringify(c));
+    await page.screenshot({ path: path.join(OUT, 'look.png') });
+    // сброс возвращает стандартные цвета
+    await page.click('.bg-btn');
+    await page.click('.look .reset');
+    c = await css();
+    assert.equal(c.dot, '');
+    assert.notEqual(c.bg, 'rgb(255, 248, 225)');
+    await page.keyboard.press('Escape');
+    await home();
+  });
+
   await step('перезагрузка сохраняет доски и объекты', async () => {
     await page.reload();
     await page.waitForTimeout(500);

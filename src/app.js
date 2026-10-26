@@ -15,6 +15,11 @@ import { uid, debounce, download } from './core/util.js';
 import { textObjectHeight } from './render/draw.js';
 import { exportPNGBlob, exportSVGString, exportPDFBytes, exportBoardJSON, parseBoardJSON } from './export.js';
 
+function hexToRgba(hex, a) {
+  const n = parseInt(hex.slice(1), 16);
+  return `rgba(${n >> 16}, ${(n >> 8) & 255}, ${n & 255}, ${a})`;
+}
+
 const DEFAULT_SETTINGS = {
   pressure: 0.8,
   smoothing: 0,
@@ -74,6 +79,8 @@ export class App {
     this.view = 'home';
     this.origin = { x: 0, y: 0 };
     this.boardBg = null;
+    this.boardBgColor = null;
+    this.boardLineColor = null;
     this.toolName = 'select';
     this.lastDrawTool = 'pen';
     this.diag = { inputToDraw: 0 };
@@ -145,7 +152,7 @@ export class App {
     const bump = this.contentDirty;
     this.contentDirty = false;
     try {
-      const json = this.scene.toJSONString({ camera: this.cam.toJSON(), origin: this.origin, bg: this.boardBg });
+      const json = this.scene.toJSONString({ camera: this.cam.toJSON(), origin: this.origin, bg: this.boardBg, bgColor: this.boardBgColor, lineColor: this.boardLineColor });
       await this.storage.saveBoard(this.meta.id, json, bump);
     } catch (e) {
       this.dirty = true;
@@ -168,7 +175,7 @@ export class App {
     const pad = Math.max(b.w, b.h) * 0.06 + 10;
     const rect = { x: b.x - pad, y: b.y - pad, w: b.w + pad * 2, h: b.h + pad * 2 };
     const scale = Math.min(W / rect.w, H / rect.h);
-    const cv = this.renderer.renderToCanvas(objs, rect, scale, { background: '#ffffff' });
+    const cv = this.renderer.renderToCanvas(objs, rect, scale, { background: this.boardBgColor || '#ffffff' });
     return cv.toDataURL('image/jpeg', 0.72);
   }
 
@@ -181,6 +188,8 @@ export class App {
     this.scene.load(data.objects || []);
     this.origin = data.origin ? { x: data.origin.x || 0, y: data.origin.y || 0 } : { x: 0, y: 0 };
     this.boardBg = ['dots', 'grid', 'cells', 'none'].includes(data.bg) ? data.bg : null;
+    this.boardBgColor = /^#[0-9a-f]{6}$/i.test(data.bgColor) ? data.bgColor : null;
+    this.boardLineColor = /^#[0-9a-f]{6}$/i.test(data.lineColor) ? data.lineColor : null;
     this.history.clear();
     this.cam.w = this.stage.clientWidth;
     this.cam.h = this.stage.clientHeight;
@@ -292,6 +301,13 @@ export class App {
     st.setProperty('--gx', ((-cam.x * cam.z) % step) + 'px');
     st.setProperty('--gy', ((-cam.y * cam.z) % step) + 'px');
     this.stage.dataset.bg = this.boardBg || this.settings.bg;
+    // свои цвета переопределяют значения из таблицы стилей; null возвращает стандартные
+    const bg = this.boardBgColor, line = this.boardLineColor;
+    if (bg) st.setProperty('--board', bg); else st.removeProperty('--board');
+    if (line) {
+      const style = this.stage.dataset.bg;
+      st.setProperty('--dot', hexToRgba(line, style === 'dots' ? 0.6 : 0.4));
+    } else st.removeProperty('--dot');
   }
 
   applyTheme() {
@@ -300,11 +316,13 @@ export class App {
     document.documentElement.dataset.theme = dark ? 'dark' : 'light';
   }
 
-  // Фон принадлежит доске и сохраняется в её файле
-  setBoardBg(bg) {
-    this.boardBg = bg;
+  // Вид доски: стиль фона, цвет фона и цвет линий. undefined не трогает поле, null сбрасывает к стандартному.
+  setBoardLook({ bg, bgColor, lineColor }) {
+    if (bg !== undefined) this.boardBg = bg;
+    if (bgColor !== undefined) this.boardBgColor = bgColor;
+    if (lineColor !== undefined) this.boardLineColor = lineColor;
     this.dirty = true;
-    this.saveCamSoon();
+    this.saveSoon();
     this.applyBackground();
   }
 
@@ -799,7 +817,7 @@ export class App {
           const newId = await this.storage.putAsset(blob);
           for (const o of parsed.objects) if (o.assetId === oldId) o.assetId = newId;
         }
-        await this.storage.saveBoard(meta.id, JSON.stringify({ v: 1, objects: parsed.objects, camera: null, bg: parsed.bg }));
+        await this.storage.saveBoard(meta.id, JSON.stringify({ v: 1, objects: parsed.objects, camera: null, bg: parsed.bg, bgColor: parsed.bgColor, lineColor: parsed.lineColor }));
         this.ui.toast(t('boardImported'));
         await this.ui.openBoard(meta.id);
       } catch (e) {
