@@ -1,0 +1,340 @@
+// E2E-проверка в Chromium: node test/e2e.js  (нужен пакет playwright)
+const { chromium } = require('playwright');
+const { start } = require('./serve.js');
+const assert = require('node:assert/strict');
+const fs = require('fs');
+const path = require('path');
+
+const OUT = path.join(__dirname, 'out');
+fs.mkdirSync(OUT, { recursive: true });
+
+let passed = 0;
+async function step(name, fn) {
+  try { await fn(); passed++; console.log('ok   ' + name); }
+  catch (e) { console.log('FAIL ' + name + '\n     ' + (e.stack || e).split('\n').slice(0, 4).join('\n     ')); process.exitCode = 1; }
+}
+
+(async () => {
+  const server = await start(5199);
+  const browser = await chromium.launch();
+  const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2 });
+  const errors = [];
+  page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
+  page.on('pageerror', (e) => errors.push('pageerror: ' + e.stack));
+  page.on('dialog', (d) => d.accept());
+  const cdp = await page.context().newCDPSession(page);
+  const pen = (type, x, y, force) => cdp.send('Input.dispatchMouseEvent', {
+    type, x, y, button: force || type === 'mouseReleased' ? 'left' : 'none', buttons: force ? 1 : 0, pointerType: 'pen', force: force || 0, clickCount: type === 'mouseMoved' ? 0 : 1,
+  });
+  const B = (fn, arg) => page.evaluate(fn, arg);
+  const objs = () => B(() => window.__board.scene.all().map((o) => ({ id: o.id, type: o.type, shape: o.shape, x: o.x, y: o.y, w: o.w, h: o.h, rot: o.rot, z: o.z, group: o.group, text: o.text, s: o.s })));
+  const drag = async (x0, y0, x1, y1, steps = 8, mods = []) => {
+    for (const m of mods) await page.keyboard.down(m);
+    await page.mouse.move(x0, y0); await page.mouse.down();
+    await page.mouse.move(x1, y1, { steps }); await page.mouse.up();
+    for (const m of mods) await page.keyboard.up(m);
+  };
+  const newBoard = async () => { await page.click('.primary'); await page.waitForTimeout(350); };
+  const home = async () => { await page.click('.top-left .tb'); await page.waitForTimeout(400); };
+
+  await page.goto('http://localhost:5199/');
+  await page.waitForTimeout(400);
+
+  await step('создание доски открывает холст', async () => {
+    await newBoard();
+    assert.equal(await B(() => window.__board.view), 'board');
+    assert.equal((await objs()).length, 0);
+  });
+
+  await step('перо: штрих с переменной толщиной от давления', async () => {
+    await page.keyboard.press('p');
+    await pen('mouseMoved', 500, 400, 0);
+    await pen('mousePressed', 500, 400, 0.2);
+    for (let i = 1; i <= 60; i++) await pen('mouseMoved', 500 + i * 6, 400 + Math.sin(i / 8) * 50, 0.1 + 0.85 * (i / 60));
+    await pen('mouseReleased', 860, 400 + Math.sin(60 / 8) * 50, 0);
+    const o = (await B(() => window.__board.scene.all().filter((x) => x.type === 'stroke').map((x) => ({ n: x.pts.length / 3, v: x.s.var, r0: x.pts[2], r1: x.pts[x.pts.length - 1] }))))[0];
+    assert.ok(o.n > 30, 'points ' + o.n);
+    assert.equal(o.v, true);
+    assert.ok(o.r1 > o.r0 * 1.8, `radius should grow with pressure: ${o.r0} -> ${o.r1}`);
+  });
+
+  await step('ластик удаляет штрих, отмена возвращает', async () => {
+    await page.keyboard.press('e');
+    await drag(480, 400, 700, 400, 12);
+    assert.equal((await objs()).filter((o) => o.type === 'stroke').length, 0);
+    await page.keyboard.press('Control+z');
+    assert.equal((await objs()).filter((o) => o.type === 'stroke').length, 1);
+  });
+
+  await step('маркер и мышь рисуют штрих постоянной толщины', async () => {
+    await page.keyboard.press('m');
+    await drag(300, 600, 500, 620, 10);
+    const hl = await B(() => window.__board.scene.all().find((o) => o.s.hl));
+    assert.ok(hl && hl.s.var === false);
+  });
+
+  let rectId;
+  await step('фигура: создание перетаскиванием, затем изменение размера и поворот', async () => {
+    await page.keyboard.press('r');
+    await drag(900, 150, 1050, 250, 6);
+    const r = (await objs()).find((o) => o.type === 'shape');
+    rectId = r.id;
+    assert.ok(Math.abs(r.w - 150) < 3 && Math.abs(r.h - 100) < 3, JSON.stringify(r));
+    // тянем правую нижнюю ручку
+    await drag(1050, 250, 1150, 330, 8);
+    const r2 = (await objs()).find((o) => o.id === rectId);
+    assert.ok(Math.abs(r2.w - 250) < 4 && Math.abs(r2.h - 180) < 4, JSON.stringify(r2));
+    // поворот: ручка над верхним центром, тянем вправо
+    const cx = r2.x + r2.w / 2, cy = r2.y + r2.h / 2;
+    const cam = await B(() => ({ x: window.__board.cam.x, y: window.__board.cam.y }));
+    const hx = cx - cam.x, hy = r2.y - cam.y - 28;
+    await drag(hx, hy, hx + 150, hy + 100, 8);
+    const r3 = (await objs()).find((o) => o.id === rectId);
+    assert.ok(Math.abs(r3.rot) > 0.3, 'rot ' + r3.rot);
+    await page.keyboard.press('Control+z');
+    assert.equal((await objs()).find((o) => o.id === rectId).rot, 0);
+  });
+
+  await step('стикер: ввод текста, авто-размер шрифта', async () => {
+    await page.keyboard.press('s');
+    await page.mouse.click(300, 250);
+    await page.keyboard.type('Идея: бесконечные доски');
+    await page.keyboard.press('Escape');
+    const st = (await objs()).find((o) => o.type === 'sticky');
+    assert.equal(st.text, 'Идея: бесконечные доски');
+    await B(() => { const s = window.__board.scene.all().find((o) => o.type === 'sticky'); s.text = 'очень '.repeat(60); s._fit = null; s._layout = null; });
+    const size = await B(async () => { const m = await import('/render/draw.js'); return m.fitSize(window.__board.scene.all().find((o) => o.type === 'sticky')); });
+    assert.ok(size < 22 && size >= 8, 'fit ' + size);
+    await B(() => { const s = window.__board.scene.all().find((o) => o.type === 'sticky'); s.text = 'Идея: бесконечные доски'; s._fit = null; s._layout = null; window.__board.renderer.markScene(); });
+  });
+
+  await step('копирование и вставка через буфер, внутренний формат', async () => {
+    const before = (await objs()).length;
+    await B(() => { const a = window.__board; a.select([a.scene.all().find((o) => o.type === 'sticky')]); });
+    const data = await B(() => {
+      const dt = new DataTransfer();
+      document.dispatchEvent(new ClipboardEvent('copy', { clipboardData: dt, bubbles: true, cancelable: true }));
+      return dt.getData('application/x-board');
+    });
+    assert.ok(data && data.includes('sticky'));
+    await B((d) => {
+      const dt = new DataTransfer();
+      dt.setData('application/x-board', d);
+      document.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+    }, data);
+    assert.equal((await objs()).length, before + 1);
+    await B(() => window.__board.undo());
+    assert.equal((await objs()).length, before);
+  });
+
+  await step('вставка обычного текста создаёт текстовый объект', async () => {
+    await B(() => {
+      const dt = new DataTransfer();
+      dt.setData('text/plain', 'Вставленный текст');
+      document.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+    });
+    const t = (await objs()).find((o) => o.type === 'text');
+    assert.equal(t.text, 'Вставленный текст');
+    await B(() => window.__board.undo());
+  });
+
+  await step('группа: общая рамка, перемещение, разгруппировка', async () => {
+    await B(() => { const a = window.__board; a.select(a.scene.all().filter((o) => o.type === 'sticky' || o.type === 'shape')); a.group(); a.clearSelection(); });
+    const o0 = await objs();
+    const sticky = o0.find((o) => o.type === 'sticky');
+    assert.ok(sticky.group);
+    const cam = await B(() => ({ x: window.__board.cam.x, y: window.__board.cam.y }));
+    await page.keyboard.press('v');
+    await drag(sticky.x - cam.x + 20, sticky.y - cam.y + 20, sticky.x - cam.x + 20, sticky.y - cam.y + 60, 5);
+    const o1 = await objs();
+    const dy = o1.find((o) => o.type === 'sticky').y - sticky.y;
+    const dyShape = o1.find((o) => o.type === 'shape').y - o0.find((o) => o.type === 'shape').y;
+    assert.ok(Math.abs(dy - 40) < 3 && Math.abs(dyShape - 40) < 3, `dy ${dy} dyShape ${dyShape}`);
+    await B(() => window.__board.ungroup());
+    assert.ok(!(await objs()).some((o) => o.group));
+  });
+
+  await step('фрейм: перемещение увлекает содержимое', async () => {
+    await page.keyboard.press('f');
+    await drag(100, 120, 420, 340, 6);
+    await page.keyboard.press('Escape'); // закончить ввод названия
+    await page.keyboard.type('');
+    await B(() => window.__board.endTextEdit());
+    const fr = (await objs()).find((o) => o.type === 'frame');
+    assert.ok(fr, 'frame');
+    await B(() => { const a = window.__board; const s = a.scene.all().find((o) => o.type === 'sticky'); s.x = a.scene.all().find((o) => o.type === 'frame').x + 40; s.y = a.scene.all().find((o) => o.type === 'frame').y + 40; a.scene.touch(s); a.clearSelection(); });
+    const st0 = (await objs()).find((o) => o.type === 'sticky');
+    const cam = await B(() => ({ x: window.__board.cam.x, y: window.__board.cam.y }));
+    // тянем за рамку (границу)
+    await page.keyboard.press('v');
+    await drag(fr.x - cam.x + 2, fr.y - cam.y + fr.h / 2, fr.x - cam.x + 102, fr.y - cam.y + fr.h / 2, 6);
+    const st1 = (await objs()).find((o) => o.type === 'sticky');
+    assert.ok(Math.abs(st1.x - st0.x - 100) < 3, `sticky moved ${st1.x - st0.x}`);
+  });
+
+  await step('коннектор по портам, следует за фигурой', async () => {
+    await B(() => { const a = window.__board; a.scene.all().filter((o) => o.type === 'connector').forEach((c) => a.scene.remove(c.id)); });
+    const s = (await objs()).filter((o) => o.type === 'shape' || o.type === 'sticky');
+    assert.ok(s.length >= 2);
+    const [a, b] = s;
+    const cam = await B(() => ({ x: window.__board.cam.x, y: window.__board.cam.y, z: window.__board.cam.z }));
+    await page.keyboard.press('c');
+    await drag(a.x + a.w / 2 - cam.x, a.y + a.h / 2 - cam.y, b.x + b.w / 2 - cam.x, b.y + b.h / 2 - cam.y, 8);
+    const c = await B(() => window.__board.scene.all().find((o) => o.type === 'connector'));
+    assert.ok(c.from.id && c.to.id, JSON.stringify(c));
+    const before = await B((id) => window.__board.scene.route(window.__board.scene.get(id)).pts.slice(), c.id);
+    await B((toId) => { const a = window.__board; const o = a.scene.get(toId); o.x += 120; a.scene.touch(o); }, c.to.id);
+    const after = await B((id) => window.__board.scene.route(window.__board.scene.get(id)).pts.slice(), c.id);
+    assert.notDeepEqual(before, after);
+  });
+
+  await step('выравнивание выделенных объектов', async () => {
+    await B(() => { const a = window.__board; a.setSelectionIds(a.scene.all().filter((o) => o.type === 'sticky' || o.type === 'shape').map((o) => o.id)); a.alignSelection('alignL'); });
+    const xs = (await B(() => window.__board.scene.all().filter((o) => o.type === 'sticky' || o.type === 'shape').map((o) => window.__board.scene.bounds(o).x)));
+    assert.ok(xs.every((x) => Math.abs(x - xs[0]) < 0.01), JSON.stringify(xs));
+  });
+
+  await step('изображение: добавление и отрисовка', async () => {
+    await B(async () => {
+      const cv = document.createElement('canvas'); cv.width = 120; cv.height = 80;
+      const g = cv.getContext('2d'); g.fillStyle = '#e03131'; g.fillRect(0, 0, 120, 80); g.fillStyle = '#fff'; g.fillRect(20, 20, 40, 40);
+      const blob = await new Promise((r) => cv.toBlob(r, 'image/png'));
+      await window.__board.addImageFile(blob, { x: 100, y: 200 });
+    });
+    await page.waitForTimeout(400);
+    const img = (await objs()).find((o) => o.type === 'image');
+    assert.ok(img && img.w > 0);
+    const px = await B(() => { const c = window.__board.renderer.sceneCv; const g = c.getContext('2d'); const cam = window.__board.cam; const [sx, sy] = cam.toScreen(100, 200); const d = g.getImageData(Math.round((sx - 40) * 2), Math.round((sy) * 2), 1, 1).data; return Array.from(d); });
+    assert.ok(px[3] > 200, 'image pixel alpha ' + px);
+  });
+
+  await step('экспорт PNG, SVG, JSON и обратный импорт', async () => {
+    const r = await B(async () => {
+      const a = window.__board;
+      const m = await import('/export.js');
+      const objs = a.scene.all();
+      const png = await m.exportPNGBlob(a, objs);
+      const svg = await m.exportSVGString(a, objs);
+      const json = await m.exportBoardJSON(a);
+      const doc = new DOMParser().parseFromString(svg, 'image/svg+xml');
+      const parsed = m.parseBoardJSON(json);
+      return { png: png.size, type: png.type, svgOk: !doc.querySelector('parsererror'), paths: doc.querySelectorAll('path').length, images: doc.querySelectorAll('image').length, texts: doc.querySelectorAll('text').length, restored: parsed.objects.length, total: objs.length, assets: Object.keys(parsed.assets).length };
+    });
+    assert.ok(r.png > 1500 && r.type === 'image/png');
+    assert.ok(r.svgOk && r.paths > 2 && r.images === 1 && r.texts >= 1, JSON.stringify(r));
+    assert.equal(r.restored, r.total);
+    assert.equal(r.assets, 1);
+  });
+
+  await step('бесконечный холст: далёкие координаты и пределы масштаба', async () => {
+    await B(() => { const a = window.__board; a.cam.x = 5e6; a.cam.y = -3e6; a.cameraChanged(); });
+    await page.keyboard.press('p');
+    await pen('mouseMoved', 600, 400, 0);
+    await pen('mousePressed', 600, 400, 0.5);
+    for (let i = 1; i < 30; i++) await pen('mouseMoved', 600 + i * 8, 400 + i * 2, 0.5);
+    await pen('mouseReleased', 840, 460, 0);
+    const far = await B(() => window.__board.scene.all().filter((o) => o.type === 'stroke').pop());
+    assert.ok(far.x > 4.9e6 && far.y < -2.9e6, `${far.x},${far.y}`);
+    await B(() => { const a = window.__board; for (let i = 0; i < 60; i++) a.zoomBy(0.5); });
+    assert.ok(Math.abs((await B(() => window.__board.cam.z)) - 0.02) < 1e-9);
+    await B(() => { const a = window.__board; for (let i = 0; i < 60; i++) a.zoomBy(2); });
+    assert.equal(await B(() => window.__board.cam.z), 32);
+    await B(() => window.__board.fitContent());
+  });
+
+  await step('колесо: масштаб вокруг курсора и панорамирование трекпадом', async () => {
+    await B(() => { const a = window.__board; a.cam.z = 1; a.cam.x = 0; a.cam.y = 0; a.cameraChanged(); });
+    const w0 = await B(() => window.__board.cam.toWorld(700, 400));
+    await page.mouse.move(700, 400);
+    await page.keyboard.down('Control');
+    await page.mouse.wheel(0, -120);
+    await page.keyboard.up('Control');
+    const st = await B(() => ({ z: window.__board.cam.z, w: window.__board.cam.toWorld(700, 400) }));
+    assert.ok(st.z > 1);
+    assert.ok(Math.abs(st.w[0] - w0[0]) < 1e-6 && Math.abs(st.w[1] - w0[1]) < 1e-6);
+    const x0 = await B(() => window.__board.cam.x);
+    await page.mouse.wheel(40, 0);
+    assert.ok((await B(() => window.__board.cam.x)) !== x0);
+  });
+
+  await step('несколько досок: список, переименование, копия, удаление, сохранение', async () => {
+    await page.waitForTimeout(900);
+    await home();
+    await newBoard();
+    await home();
+    await newBoard();
+    await home();
+    let cards = await page.$$('.card:not(.new)');
+    assert.equal(cards.length, 3);
+    // переименование
+    await cards[0].hover();
+    await (await cards[0].$('.more')).click();
+    await page.click('.menu >> text=Переименовать').catch(() => page.click('.menu >> text=Rename'));
+    await page.keyboard.type('Планирование');
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(400);
+    assert.ok((await page.textContent('.cards')).includes('Планирование'));
+    // дублирование
+    cards = await page.$$('.card:not(.new)');
+    await (await cards[0].$('.more')).click();
+    await page.click('.menu button:nth-child(2)');
+    await page.waitForTimeout(400);
+    assert.equal((await page.$$('.card:not(.new)')).length, 4);
+    // удаление
+    const copyCard = await page.$('.card:has-text("(copy)")');
+    await (await copyCard.$('.more')).click();
+    await page.click('.menu .danger');
+    await page.waitForTimeout(400);
+    assert.equal((await page.$$('.card:not(.new)')).length, 3);
+    // открыть доску с данными: у первой созданной доски есть объекты
+    const counts = [];
+    for (let i = 0; i < 3; i++) {
+      await (await page.$$('.card:not(.new)'))[i].click();
+      await page.waitForTimeout(500);
+      counts.push(await B(() => window.__board.scene.all().length));
+      await home();
+    }
+    assert.ok(counts.some((n) => n > 5), 'одна из досок хранит объекты: ' + counts);
+  });
+
+  await step('перезагрузка сохраняет доски и объекты', async () => {
+    await page.reload();
+    await page.waitForTimeout(500);
+    const cards = await page.$$('.card:not(.new)');
+    assert.equal(cards.length, 3);
+    let max = 0;
+    for (let i = 0; i < cards.length; i++) {
+      await (await page.$$('.card:not(.new)'))[i].click();
+      await page.waitForTimeout(500);
+      max = Math.max(max, await B(() => window.__board.scene.all().length));
+      await home();
+    }
+    assert.ok(max > 5, 'objects restored ' + max);
+  });
+
+  await step('замер задержки: событие пера до отрисовки', async () => {
+    await (await page.$$('.card:not(.new)'))[0].click();
+    await page.waitForTimeout(400);
+    await B(() => { window.__board.settings.diag = true; });
+    await page.keyboard.press('p');
+    await pen('mouseMoved', 300, 700, 0);
+    await pen('mousePressed', 300, 700, 0.5);
+    const lat = [];
+    for (let i = 1; i <= 120; i++) {
+      await pen('mouseMoved', 300 + i * 8, 700 + Math.sin(i / 10) * 80, 0.6);
+      if (i % 10 === 0) lat.push(await B(() => window.__board.diag.inputToDraw));
+    }
+    await pen('mouseReleased', 1260, 700, 0);
+    console.log('     input→draw (мс, headless, без GPU):', lat.map((v) => v.toFixed(1)).join(' '));
+    const warm = lat.slice(2).sort((a, b) => a - b);
+    const median = warm[warm.length >> 1];
+    assert.ok(median < 30, 'median latency ' + median); // один кадр при 60 Гц это 16.7 мс
+    await page.screenshot({ path: path.join(OUT, 'final.png') });
+  });
+
+  console.log(errors.length ? 'Ошибки консоли:\n' + errors.join('\n') : 'Ошибок консоли нет');
+  if (errors.length) process.exitCode = 1;
+  console.log(`${passed} шагов пройдено`);
+  await browser.close();
+  server.close();
+})();

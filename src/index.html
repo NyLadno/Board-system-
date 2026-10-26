@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data: blob: file:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' blob: data: file:">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Board</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="app">
+    <div id="home-view" hidden></div>
+    <div id="board-view" hidden>
+      <div id="stage" tabindex="0">
+        <div id="textLayer"></div>
+      </div>
+      <div id="chrome"></div>
+    </div>
+    <div id="modal-root"></div>
+    <div id="toast"></div>
+  </div>
+  <script type="module" src="main.js"></script>
+</body>
+</html>

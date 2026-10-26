@@ -1,0 +1,32 @@
+{
+  "name": "board-system",
+  "productName": "Board",
+  "version": "0.1.0",
+  "description": "Бесконечная доска в стиле Miro с низкой задержкой пера для macOS 12+",
+  "main": "main.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "electron .",
+    "dev": "node test/serve.js",
+    "test": "node --test \"test/unit/*.test.js\"",
+    "test:e2e": "node test/e2e.js",
+    "dist": "electron-builder --mac --universal"
+  },
+  "devDependencies": {
+    "electron": "38.8.6",
+    "electron-builder": "^26.0.0",
+    "playwright": "^1.50.0"
+  },
+  "build": {
+    "appId": "dev.nyladno.board",
+    "productName": "Board",
+    "files": ["main.js", "preload.js", "src/**/*", "build/**/*", "package.json"],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "minimumSystemVersion": "12.0.0",
+      "target": ["dmg", "zip"],
+      "identity": null
+    }
+  },
+  "license": "MIT"
+}
