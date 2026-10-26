@@ -34,11 +34,36 @@ async function step(name, fn) {
     await page.mouse.move(x1, y1, { steps }); await page.mouse.up();
     for (const m of mods) await page.keyboard.up(m);
   };
-  const newBoard = async () => { await page.click('.primary'); await page.waitForTimeout(350); };
+  const newBoard = async () => { await page.click('.primary'); await page.click('.tpl-card[data-tpl="blank"]'); await page.waitForTimeout(350); };
   const home = async () => { await page.click('.top-left .tb'); await page.waitForTimeout(400); };
 
   await page.goto('http://localhost:5199/');
   await page.waitForTimeout(400);
+
+  await step('шаблоны: каждый создаёт доску с содержимым без ошибок', async () => {
+    const ids = await B(async () => (await import('/templates.js')).TEMPLATES.map((t) => t.id));
+    assert.ok(ids.length >= 9);
+    for (const id of ids) {
+      await page.click('.primary');
+      await page.waitForSelector('.tpl-card');
+      await page.click(`.tpl-card[data-tpl="${id}"]`);
+      await page.waitForTimeout(450);
+      const n = await B(() => ({ objs: window.__board.scene.all().length, frames: window.__board.scene.all().filter((o) => o.type === 'frame').length, name: window.__board.meta.name, z: window.__board.cam.z }));
+      if (id === 'blank') assert.equal(n.objs, 0);
+      else assert.ok(n.objs >= 6, id + ' ' + JSON.stringify(n));
+      if (id === 'kanban' || id === 'retro') assert.equal(n.frames, 3);
+      if (id === 'swot' || id === 'eisenhower') assert.equal(n.frames, 4);
+      if (id === 'week') assert.equal(n.frames, 5);
+      if (id === 'mindmap') await page.screenshot({ path: path.join(OUT, 'tpl-mindmap.png') });
+      if (id === 'flowchart') await page.screenshot({ path: path.join(OUT, 'tpl-flowchart.png') });
+      await home();
+    }
+    // очистка: удаляем доски, чтобы не мешать следующим шагам
+    const boards = await B(async () => (await window.__board.storage.listBoards()).map((m) => m.id));
+    for (const id of boards) await B((i) => window.__board.storage.deleteBoard(i), id);
+    await B(() => window.__board.ui.renderHome());
+    await page.waitForTimeout(300);
+  });
 
   await step('создание доски открывает холст', async () => {
     await newBoard();

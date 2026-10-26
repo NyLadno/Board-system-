@@ -5,6 +5,8 @@ import { popover, closePopover } from './pop.js';
 import { ContextPanel, swatches, slider } from './panel.js';
 import { PALETTE, STICKY_COLORS } from '../core/scene.js';
 import { SHAPES } from '../render/draw.js';
+import { TEMPLATES } from '../templates.js';
+import { Scene } from '../core/scene.js';
 
 const TOOLBAR = [
   ['select', 'select', 'select'],
@@ -385,8 +387,44 @@ export class UI {
     } catch { return new Date(ts).toLocaleString(); }
   }
 
-  async newBoard() {
-    const meta = await this.app.storage.createBoard(t('untitled'));
+  // Галерея шаблонов: превью строятся из тех же объектов, что попадут на доску
+  newBoard() {
+    const app = this.app;
+    const root = document.getElementById('modal-root');
+    const close = () => { root.textContent = ''; };
+    const grid = h('div', { class: 'tpl-grid' });
+    for (const tpl of TEMPLATES) {
+      const thumb = h('div', { class: 'tpl-thumb' });
+      const card = h('button', { class: 'tpl-card', 'data-tpl': tpl.id }, thumb, h('div', { class: 'tpl-name' }, tpl.name()));
+      if (tpl.id === 'blank') thumb.innerHTML = icon('plus', 30);
+      else {
+        const objs = tpl.build();
+        const sc = new Scene();
+        sc.load(objs);
+        const b = sc.boundsOf(sc.all());
+        const pad = 30;
+        const rect = { x: b.x - pad, y: b.y - pad, w: b.w + pad * 2, h: b.h + pad * 2 };
+        const scale = Math.min(520 / rect.w, 330 / rect.h);
+        const cv = app.renderer.renderToCanvas(sc.all(), rect, scale * 2, { background: '#f6f7f9', scene: sc });
+        thumb.append(cv);
+      }
+      card.addEventListener('click', async () => { close(); await this.createFromTemplate(tpl); });
+      grid.append(card);
+    }
+    const modal = h('div', { class: 'modal wide' },
+      h('div', { class: 'modal-head' }, h('h2', null, t('chooseTemplate')), h('button', { class: 'tb', html: icon('plus', 18, 'style="transform:rotate(45deg)"'), title: t('close'), onclick: close })),
+      grid);
+    const back = h('div', { class: 'backdrop' }, modal);
+    back.addEventListener('pointerdown', (e) => { if (e.target === back) close(); });
+    modal.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); e.stopPropagation(); });
+    root.textContent = '';
+    root.append(back);
+  }
+
+  async createFromTemplate(tpl) {
+    const objects = tpl.build();
+    const meta = await this.app.storage.createBoard(tpl.id === 'blank' ? t('untitled') : tpl.name());
+    if (objects.length) await this.app.storage.saveBoard(meta.id, JSON.stringify({ v: 1, objects, camera: null }), false);
     await this.openBoard(meta.id);
   }
 

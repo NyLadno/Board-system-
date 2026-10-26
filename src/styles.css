@@ -166,3 +166,12 @@ input, select { font: inherit; color: inherit; user-select: text; -webkit-user-s
 .krow { display: flex; gap: 12px; align-items: baseline; }
 .krow kbd { min-width: 150px; font: 12px ui-monospace, "SF Mono", Menlo, monospace; background: var(--hover); border-radius: 6px; padding: 2px 8px; }
 .krow span { color: var(--muted); }
+
+.modal.wide { width: 960px; max-width: calc(100vw - 48px); }
+.tpl-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; padding: 12px 0 8px; }
+.tpl-card { border: 1px solid var(--panel-border); background: var(--panel); border-radius: 12px; padding: 0; overflow: hidden; text-align: left; transition: transform 0.12s, box-shadow 0.12s; }
+.tpl-card:hover { transform: translateY(-2px); box-shadow: var(--shadow); }
+.tpl-card:focus-visible { outline: 2px solid var(--accent); }
+.tpl-thumb { aspect-ratio: 16 / 10; background: #f6f7f9; display: grid; place-items: center; color: var(--accent); }
+.tpl-thumb canvas { width: 100%; height: 100%; object-fit: contain; display: block; }
+.tpl-name { padding: 10px 14px; font-weight: 600; }

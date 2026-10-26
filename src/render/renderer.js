@@ -156,7 +156,7 @@ export class Renderer {
   }
 
   // Растеризация произвольной области в отдельный холст (экспорт, миниатюры)
-  renderToCanvas(objs, rect, scale, { background = null, dark = false } = {}) {
+  renderToCanvas(objs, rect, scale, { background = null, dark = false, scene = null } = {}) {
     const w = Math.max(1, Math.round(rect.w * scale));
     const h = Math.max(1, Math.round(rect.h * scale));
     const cv = document.createElement('canvas');
@@ -165,7 +165,7 @@ export class Renderer {
     const ctx = cv.getContext('2d');
     if (background) { ctx.fillStyle = background; ctx.fillRect(0, 0, w, h); }
     ctx.setTransform(scale, 0, 0, scale, -rect.x * scale, -rect.y * scale);
-    const view = { zoom: scale, scene: this.app.scene, images: this.images, editingId: null, dark };
+    const view = { zoom: scale, scene: scene || this.app.scene, images: this.images, editingId: null, dark };
     for (const o of objs) drawObject(ctx, o, view);
     return cv;
   }
