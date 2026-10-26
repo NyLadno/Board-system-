@@ -166,7 +166,7 @@ export async function exportBoardJSON(app) {
       try { assets[o.assetId] = await blobToDataURL(await app.storage.getAssetBlob(o.assetId)); } catch { /* пропущено */ }
     }
   }
-  return JSON.stringify({ app: 'board-system', v: 1, name: app.meta.name, objects, assets, camera: app.cam.toJSON() });
+  return JSON.stringify({ app: 'board-system', v: 1, name: app.meta.name, objects, assets, camera: app.cam.toJSON(), bg: app.boardBg });
 }
 
 const TYPES = new Set(['stroke', 'shape', 'sticky', 'text', 'frame', 'image', 'connector']);
@@ -179,5 +179,6 @@ export function parseBoardJSON(text) {
   if (d.assets && typeof d.assets === 'object') {
     for (const [k, v] of Object.entries(d.assets)) if (typeof v === 'string' && v.startsWith('data:image/')) assets[k] = v;
   }
-  return { name: typeof d.name === 'string' ? d.name.slice(0, 120) : null, objects, assets };
+  const bg = ['dots', 'grid', 'cells', 'none'].includes(d.bg) ? d.bg : null;
+  return { name: typeof d.name === 'string' ? d.name.slice(0, 120) : null, objects, assets, bg };
 }

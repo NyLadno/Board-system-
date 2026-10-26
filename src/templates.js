@@ -88,6 +88,12 @@ export const TEMPLATES = [
     build: () => [],
   },
   {
+    id: 'cells',
+    bg: 'cells',
+    name: () => L('В клетку', 'Squared paper'),
+    build: () => [],
+  },
+  {
     id: 'kanban',
     name: () => L('Канбан', 'Kanban'),
     build() {

@@ -397,6 +397,7 @@ export class UI {
       const thumb = h('div', { class: 'tpl-thumb' });
       const card = h('button', { class: 'tpl-card', 'data-tpl': tpl.id }, thumb, h('div', { class: 'tpl-name' }, tpl.name()));
       if (tpl.id === 'blank') thumb.innerHTML = icon('plus', 30);
+      else if (tpl.bg) thumb.classList.add('bg-' + tpl.bg);
       else {
         const objs = tpl.build();
         const sc = new Scene();
@@ -424,7 +425,7 @@ export class UI {
   async createFromTemplate(tpl) {
     const objects = tpl.build();
     const meta = await this.app.storage.createBoard(tpl.id === 'blank' ? t('untitled') : tpl.name());
-    if (objects.length) await this.app.storage.saveBoard(meta.id, JSON.stringify({ v: 1, objects, camera: null }), false);
+    if (objects.length || tpl.bg) await this.app.storage.saveBoard(meta.id, JSON.stringify({ v: 1, objects, camera: null, bg: tpl.bg || null }), false);
     await this.openBoard(meta.id);
   }
 
@@ -477,7 +478,13 @@ export class UI {
       row(t('palm'), toggle('palmRejection')),
       row(t('touchDraw'), toggle('touchDraw')),
       h('h3', null, t('background')),
-      row(t('background'), select('bg', [['dots', t('bgDots')], ['grid', t('bgGrid')], ['none', t('bgNone')]])),
+      row(t('background'), (() => {
+        // на открытой доске меняется фон этой доски, иначе значение по умолчанию для новых
+        const cur = app.view === 'board' ? (app.boardBg || s.bg) : s.bg;
+        const sel = h('select', null, [['dots', t('bgDots')], ['grid', t('bgGrid')], ['cells', t('bgCells')], ['none', t('bgNone')]].map(([v, label]) => h('option', { value: v, selected: cur === v }, label)));
+        sel.addEventListener('change', () => { if (app.view === 'board') app.setBoardBg(sel.value); else { s.bg = sel.value; app.saveSettings(); } });
+        return sel;
+      })()),
       row(t('wheel'), select('wheel', [['zoom', t('wheelZoom')], ['pan', t('wheelPan')]])),
       row(t('minimap'), toggle('minimap')),
       h('h3', null, t('theme')),

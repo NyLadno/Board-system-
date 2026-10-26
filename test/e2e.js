@@ -49,15 +49,35 @@ async function step(name, fn) {
       await page.click(`.tpl-card[data-tpl="${id}"]`);
       await page.waitForTimeout(450);
       const n = await B(() => ({ objs: window.__board.scene.all().length, frames: window.__board.scene.all().filter((o) => o.type === 'frame').length, name: window.__board.meta.name, z: window.__board.cam.z }));
-      if (id === 'blank') assert.equal(n.objs, 0);
+      if (id === 'blank' || id === 'cells') assert.equal(n.objs, 0);
       else assert.ok(n.objs >= 6, id + ' ' + JSON.stringify(n));
       if (id === 'kanban' || id === 'retro') assert.equal(n.frames, 3);
       if (id === 'swot' || id === 'eisenhower') assert.equal(n.frames, 4);
       if (id === 'week') assert.equal(n.frames, 5);
+      if (id === 'cells') {
+        assert.equal(await B(() => window.__board.boardBg), 'cells');
+        assert.equal(await B(() => document.getElementById('stage').dataset.bg), 'cells');
+        await page.screenshot({ path: path.join(OUT, 'tpl-cells.png') });
+        await page.waitForTimeout(900);
+      }
       if (id === 'mindmap') await page.screenshot({ path: path.join(OUT, 'tpl-mindmap.png') });
       if (id === 'flowchart') await page.screenshot({ path: path.join(OUT, 'tpl-flowchart.png') });
       await home();
     }
+    // фон «в клетку» переживает перезагрузку, а у остальных досок остаётся точечный
+    await page.reload();
+    await page.waitForTimeout(500);
+    const bgs = [];
+    for (const name of ['Squared paper', 'Квадр', 'В клетку', 'Kanban', 'Канбан']) {
+      const card = await page.$(`.card:has-text("${name}")`);
+      if (!card) continue;
+      await card.click();
+      await page.waitForTimeout(450);
+      bgs.push([name, await B(() => document.getElementById('stage').dataset.bg)]);
+      await home();
+    }
+    assert.ok(bgs.some(([, bg]) => bg === 'cells'), JSON.stringify(bgs));
+    assert.ok(bgs.some(([n, bg]) => /Kanban|Канбан/.test(n) && bg === 'dots'), JSON.stringify(bgs));
     // очистка: удаляем доски, чтобы не мешать следующим шагам
     const boards = await B(async () => (await window.__board.storage.listBoards()).map((m) => m.id));
     for (const id of boards) await B((i) => window.__board.storage.deleteBoard(i), id);

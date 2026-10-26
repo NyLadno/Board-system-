@@ -41,7 +41,7 @@ input, select { font: inherit; color: inherit; user-select: text; -webkit-user-s
   touch-action: none; --gs: 24px; --gx: 0px; --gy: 0px;
 }
 #stage[data-bg="dots"] { background-image: radial-gradient(circle, var(--dot) 1.2px, transparent 1.6px); background-size: var(--gs) var(--gs); background-position: var(--gx) var(--gy); }
-#stage[data-bg="grid"] {
+#stage[data-bg="grid"], #stage[data-bg="cells"] {
   background-image: linear-gradient(var(--dot) 0.5px, transparent 0.5px), linear-gradient(90deg, var(--dot) 0.5px, transparent 0.5px);
   background-size: var(--gs) var(--gs); background-position: var(--gx) var(--gy);
 }
@@ -175,3 +175,11 @@ input, select { font: inherit; color: inherit; user-select: text; -webkit-user-s
 .tpl-thumb { aspect-ratio: 16 / 10; background: #f6f7f9; display: grid; place-items: center; color: var(--accent); }
 .tpl-thumb canvas { width: 100%; height: 100%; object-fit: contain; display: block; }
 .tpl-name { padding: 10px 14px; font-weight: 600; }
+
+/* Клетка как в тетради: тонкие синеватые линии на белом листе */
+#stage[data-bg="cells"] { --dot: rgba(75, 110, 210, 0.28); background-color: #ffffff; }
+.tpl-thumb.bg-cells {
+  background-color: #fff;
+  background-image: linear-gradient(rgba(75, 110, 210, 0.3) 1px, transparent 1px), linear-gradient(90deg, rgba(75, 110, 210, 0.3) 1px, transparent 1px);
+  background-size: 18px 18px;
+}

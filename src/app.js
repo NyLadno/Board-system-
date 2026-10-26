@@ -73,6 +73,7 @@ export class App {
     this.meta = null;
     this.view = 'home';
     this.origin = { x: 0, y: 0 };
+    this.boardBg = null;
     this.toolName = 'select';
     this.lastDrawTool = 'pen';
     this.diag = { inputToDraw: 0 };
@@ -144,7 +145,7 @@ export class App {
     const bump = this.contentDirty;
     this.contentDirty = false;
     try {
-      const json = this.scene.toJSONString({ camera: this.cam.toJSON(), origin: this.origin });
+      const json = this.scene.toJSONString({ camera: this.cam.toJSON(), origin: this.origin, bg: this.boardBg });
       await this.storage.saveBoard(this.meta.id, json, bump);
     } catch (e) {
       this.dirty = true;
@@ -179,6 +180,7 @@ export class App {
     this.selection.clear();
     this.scene.load(data.objects || []);
     this.origin = data.origin ? { x: data.origin.x || 0, y: data.origin.y || 0 } : { x: 0, y: 0 };
+    this.boardBg = ['dots', 'grid', 'cells', 'none'].includes(data.bg) ? data.bg : null;
     this.history.clear();
     this.cam.w = this.stage.clientWidth;
     this.cam.h = this.stage.clientHeight;
@@ -289,13 +291,21 @@ export class App {
     st.setProperty('--gs', step + 'px');
     st.setProperty('--gx', ((-cam.x * cam.z) % step) + 'px');
     st.setProperty('--gy', ((-cam.y * cam.z) % step) + 'px');
-    this.stage.dataset.bg = this.settings.bg;
+    this.stage.dataset.bg = this.boardBg || this.settings.bg;
   }
 
   applyTheme() {
     const th = this.settings.theme;
     const dark = th === 'dark' || (th === 'auto' && matchMedia('(prefers-color-scheme: dark)').matches);
     document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+  }
+
+  // Фон принадлежит доске и сохраняется в её файле
+  setBoardBg(bg) {
+    this.boardBg = bg;
+    this.dirty = true;
+    this.saveCamSoon();
+    this.applyBackground();
   }
 
   saveSettings() {
@@ -789,7 +799,7 @@ export class App {
           const newId = await this.storage.putAsset(blob);
           for (const o of parsed.objects) if (o.assetId === oldId) o.assetId = newId;
         }
-        await this.storage.saveBoard(meta.id, JSON.stringify({ v: 1, objects: parsed.objects, camera: null }));
+        await this.storage.saveBoard(meta.id, JSON.stringify({ v: 1, objects: parsed.objects, camera: null, bg: parsed.bg }));
         this.ui.toast(t('boardImported'));
         await this.ui.openBoard(meta.id);
       } catch (e) {
