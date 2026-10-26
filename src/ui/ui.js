@@ -6,6 +6,7 @@ import { ContextPanel, swatches, slider } from './panel.js';
 import { PALETTE, STICKY_COLORS } from '../core/scene.js';
 import { SHAPES } from '../render/draw.js';
 import { TEMPLATES } from '../templates.js';
+import { LOOKS } from '../looks.js';
 import { Scene } from '../core/scene.js';
 
 const TOOLBAR = [
@@ -189,7 +190,7 @@ export class UI {
       el.append(seg('pen', 'pen', t('pen')), seg('hl', 'highlighter', t('highlighter')), seg('eraser', 'eraser', t('eraser')), h('span', { class: 'sep' }));
       if (name !== 'eraser') {
         const st = name === 'pen' ? d.pen : d.hl;
-        el.append(swatches(PALETTE.concat(name === 'hl' ? ['#f5d90a', '#4dd4ff'] : []), st.color, (c) => {
+        el.append(swatches(app.palette().concat(name === 'hl' ? ['#f5d90a', '#4dd4ff'] : []), st.color, (c) => {
           st.color = c; save(); app._cursorKey = null; app.input.updateCursor(); this.buildOptions();
         }));
         const dot = h('i', { class: 'size-dot' });
@@ -232,10 +233,10 @@ export class UI {
         b.addEventListener('click', () => { d.connKind = kind; d.connHead = head; save(); this.buildOptions(); });
         el.append(b);
       }
-      el.append(h('span', { class: 'sep' }), swatches(PALETTE, d.connColor, (c) => { d.connColor = c; save(); this.buildOptions(); }, { custom: false }));
+      el.append(h('span', { class: 'sep' }), swatches(app.palette(), d.connColor, (c) => { d.connColor = c; save(); this.buildOptions(); }, { custom: false }));
       el.hidden = false;
     } else if (name === 'text') {
-      el.append(swatches(PALETTE, d.textColor, (c) => { d.textColor = c; save(); this.buildOptions(); }, { custom: false }));
+      el.append(swatches(app.palette(), d.textColor, (c) => { d.textColor = c; save(); this.buildOptions(); }, { custom: false }));
       el.hidden = false;
     } else {
       el.hidden = true;
@@ -307,7 +308,19 @@ export class UI {
         return b;
       }));
       const defBg = getComputedStyle(app.stage).getPropertyValue('--board').trim();
+      const presets = h('div', { class: 'looks' }, LOOKS.map((lk) => {
+        const bgc = lk.bg || '#f6f7f9';
+        const chip = h('button', { class: 'look-chip', title: lk.name(), 'data-look': lk.id },
+          h('i', { class: 'look-prev', style: { background: `radial-gradient(circle, ${lk.line || '#9aa0a6'} 1.4px, transparent 1.8px) 0 0 / 9px 9px, ${bgc}` } }),
+          h('span', null, lk.name()));
+        chip.addEventListener('click', () => {
+          app.setBoardLook({ bgColor: lk.bg, lineColor: lk.line, ...(lk.style ? { bg: lk.style } : {}) });
+          build();
+        });
+        return chip;
+      }));
       box.append(
+        h('div', { class: 'lbl' }, t('lookPresets')), presets,
         h('div', { class: 'lbl' }, t('bgStyle')), seg,
         h('div', { class: 'lbl' }, t('bgColor')),
         swatches(BG, app.boardBgColor || defBg, (c) => { app.setBoardLook({ bgColor: c }); build(); }),

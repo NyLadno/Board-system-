@@ -136,14 +136,14 @@ export class ContextPanel {
       const o = sel.find((x) => x.type === 'shape' || x.type === 'connector');
       const cur = o.s.stroke;
       const b = colorBtn(cur, t('stroke'), () => {
-        popover(b, swatches(PALETTE, cur, (c) => app.applyStyle((x) => { if (x.s.stroke !== undefined) x.s.stroke = c; })), { place: 'above' });
+        popover(b, swatches(app.palette(), cur, (c) => app.applyStyle((x) => { if (x.s.stroke !== undefined) x.s.stroke = c; })), { place: 'above' });
       }, true);
       el.append(b);
     }
     if (has('stroke')) {
       const o = sel.find((x) => x.type === 'stroke');
       const b = colorBtn(o.s.color, t('color'), () => {
-        popover(b, swatches(PALETTE, o.s.color, (c) => app.applyStyle((x) => { if (x.type === 'stroke') x.s.color = c; })), { place: 'above' });
+        popover(b, swatches(app.palette(), o.s.color, (c) => app.applyStyle((x) => { if (x.type === 'stroke') x.s.color = c; })), { place: 'above' });
       });
       el.append(b);
     }
@@ -199,7 +199,7 @@ export class ContextPanel {
       const nextA = aligns[(aligns.indexOf(o.ts.align || 'left') + 1) % 3];
       el.append(btn({ left: 'alignLeft', center: 'alignCenter', right: 'alignRight' }[o.ts.align || 'left'], t('alignCenter'), () => app.applyStyle((x) => { if (x.ts) x.ts.align = nextA; })));
       const cb = colorBtn(o.ts.color, t('textColor'), () => {
-        popover(cb, swatches(PALETTE, o.ts.color, (c) => app.applyStyle((x) => { if (x.ts) x.ts.color = c; })), { place: 'above' });
+        popover(cb, swatches(app.palette(), o.ts.color, (c) => app.applyStyle((x) => { if (x.ts) x.ts.color = c; })), { place: 'above' });
       }, true);
       el.append(cb);
       const fonts = [['sans', t('fontSans')], ['serif', t('fontSerif')], ['mono', t('fontMono')], ['hand', t('fontHand')]];

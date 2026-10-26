@@ -13,6 +13,8 @@ import { UI } from './ui/ui.js';
 import { setLang, detectLang, t } from './i18n.js';
 import { uid, debounce, download } from './core/util.js';
 import { textObjectHeight } from './render/draw.js';
+import { isDarkColor, INK_ON_DARK, INK_ON_LIGHT } from './looks.js';
+import { PALETTE } from './core/scene.js';
 import { exportPNGBlob, exportSVGString, exportPDFBytes, exportBoardJSON, parseBoardJSON } from './export.js';
 
 function hexToRgba(hex, a) {
@@ -190,6 +192,7 @@ export class App {
     this.boardBg = ['dots', 'grid', 'cells', 'none'].includes(data.bg) ? data.bg : null;
     this.boardBgColor = /^#[0-9a-f]{6}$/i.test(data.bgColor) ? data.bgColor : null;
     this.boardLineColor = /^#[0-9a-f]{6}$/i.test(data.lineColor) ? data.lineColor : null;
+    this.syncInk();
     this.history.clear();
     this.cam.w = this.stage.clientWidth;
     this.cam.h = this.stage.clientHeight;
@@ -307,13 +310,39 @@ export class App {
     if (line) {
       const style = this.stage.dataset.bg;
       st.setProperty('--dot', hexToRgba(line, style === 'dots' ? 0.6 : 0.4));
-    } else st.removeProperty('--dot');
+    } else if (this.dark) st.setProperty('--dot', 'rgba(255, 255, 255, 0.22)');
+    else st.removeProperty('--dot');
   }
 
   applyTheme() {
     const th = this.settings.theme;
     const dark = th === 'dark' || (th === 'auto' && matchMedia('(prefers-color-scheme: dark)').matches);
     document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+  }
+
+  // Палитра перьев и текста: на тёмной доске вместо чёрного первым идёт светлый
+  palette() { return this.dark ? [INK_ON_DARK, ...PALETTE.slice(1)] : PALETTE; }
+
+  // Авто-цвет: нейтральные цвета по умолчанию (чёрный или белый) подстраиваются под яркость фона.
+  // Цвета, выбранные пользователем вручную, не трогаются.
+  syncInk() {
+    const dark = !!this.boardBgColor && isDarkColor(this.boardBgColor);
+    const darkChanged = dark !== this.dark;
+    this.dark = dark;
+    const from = dark ? INK_ON_LIGHT : INK_ON_DARK;
+    const to = dark ? INK_ON_DARK : INK_ON_LIGHT;
+    const d = this.defaults;
+    let changed = false;
+    for (const [o, k] of [[d.pen, 'color'], [d, 'textColor'], [d, 'connColor']]) {
+      if (o[k] === from) { o[k] = to; changed = true; }
+    }
+    if (changed) {
+      this.saveDefaults();
+      this._cursorKey = null;
+      this.input?.updateCursor();
+      this.ui?.buildOptions();
+    }
+    if (darkChanged) this.renderer?.markScene();
   }
 
   // Вид доски: стиль фона, цвет фона и цвет линий. undefined не трогает поле, null сбрасывает к стандартному.
@@ -323,6 +352,7 @@ export class App {
     if (lineColor !== undefined) this.boardLineColor = lineColor;
     this.dirty = true;
     this.saveSoon();
+    this.syncInk();
     this.applyBackground();
   }
 

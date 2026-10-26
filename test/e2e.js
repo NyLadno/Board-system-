@@ -416,6 +416,46 @@ async function step(name, fn) {
     await home();
   });
 
+  await step('цветовые схемы доски и авто-цвет пера', async () => {
+    await (await page.$$('.card:not(.new)'))[0].click();
+    await page.waitForTimeout(400);
+    const st = () => B(() => { const a = window.__board; return { pen: a.defaults.pen.color, text: a.defaults.textColor, dark: a.dark, bg: getComputedStyle(document.getElementById('stage')).backgroundColor, dot: document.getElementById('stage').style.getPropertyValue('--dot') }; });
+    assert.equal((await st()).pen, '#1a1a1a');
+    await page.click('.bg-btn');
+    await page.click('.look-chip[data-look="chalk"]');
+    let c = await st();
+    assert.equal(c.bg, 'rgb(47, 74, 63)');
+    assert.equal(c.dark, true);
+    assert.equal(c.pen, '#f1f3f5', 'перо стало светлым');
+    assert.equal(c.text, '#f1f3f5');
+    // новый штрих рисуется светлым цветом
+    await page.keyboard.press('Escape');
+    await page.keyboard.press('p');
+    await pen('mouseMoved', 500, 300, 0); await pen('mousePressed', 500, 300, 0.5);
+    for (let i = 1; i < 20; i++) await pen('mouseMoved', 500 + i * 6, 300 + i, 0.5);
+    await pen('mouseReleased', 620, 320, 0);
+    const col = await B(() => window.__board.scene.all().filter((o) => o.type === 'stroke').pop().s.color);
+    assert.equal(col, '#f1f3f5');
+    await page.screenshot({ path: path.join(OUT, 'look-chalk.png') });
+    // выбранный вручную цвет сохраняется при смене схемы
+    await B(() => { window.__board.defaults.pen.color = '#e03131'; });
+    await page.click('.bg-btn');
+    await page.click('.look-chip[data-look="paper"]');
+    c = await st();
+    assert.equal(c.dark, false);
+    assert.equal(c.pen, '#e03131', 'ручной цвет не тронут');
+    assert.equal(c.text, '#1a1a1a', 'текст вернулся к тёмному');
+    // чертёж включает сетку; стандарт сбрасывает цвета
+    await page.click('.look-chip[data-look="blueprint"]');
+    assert.equal(await B(() => document.getElementById('stage').dataset.bg), 'grid');
+    await page.click('.look-chip[data-look="default"]');
+    c = await st();
+    assert.equal(c.dot, '');
+    await B(() => { window.__board.defaults.pen.color = '#1a1a1a'; });
+    await page.keyboard.press('Escape');
+    await home();
+  });
+
   await step('перезагрузка сохраняет доски и объекты', async () => {
     await page.reload();
     await page.waitForTimeout(500);
