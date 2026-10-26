@@ -243,6 +243,13 @@ export class Scene {
     return this.all().map(serializeObj);
   }
 
+  shiftAll(dx, dy) {
+    for (const o of this.objs.values()) {
+      shiftObj(o, dx, dy);
+      this.invalidate(o);
+    }
+  }
+
   // Быстрая сериализация без клонирования объектов; служебные поля с «_» пропускаются
   toJSONString(extra = {}) {
     return JSON.stringify({ v: 1, objects: this.all(), ...extra }, (k, v) => (k.charCodeAt(0) === 95 ? undefined : v));
@@ -255,6 +262,23 @@ export class Scene {
     this.zc = 0;
     for (const o of objects) this.add(o, true);
     this.emit('load');
+  }
+}
+
+// Сдвиг объекта на (-dx, -dy). Применяется при переносе начала координат (см. App.rebase).
+export function shiftObj(o, dx, dy) {
+  if (o.type === 'connector') {
+    for (const k of ['from', 'to']) {
+      const e = o[k];
+      if (e && !e.id) { e.x -= dx; e.y -= dy; }
+    }
+    return;
+  }
+  o.x -= dx;
+  o.y -= dy;
+  if (o.type === 'stroke') {
+    const p = o.pts;
+    for (let i = 0; i < p.length; i += 3) { p[i] -= dx; p[i + 1] -= dy; }
   }
 }
 

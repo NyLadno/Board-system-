@@ -226,15 +226,30 @@ async function step(name, fn) {
     assert.equal(r.assets, 1);
   });
 
-  await step('бесконечный холст: далёкие координаты и пределы масштаба', async () => {
-    await B(() => { const a = window.__board; a.cam.x = 5e6; a.cam.y = -3e6; a.cameraChanged(); });
+  await step('бесконечный холст: далёкие координаты, перенос начала, пределы масштаба', async () => {
+    const mark = await B(() => { const a = window.__board; const s = a.scene.all().find((o) => o.type === 'sticky'); return { id: s.id, x: s.x }; });
+    // уезжаем на сто миллионов единиц от начала координат
+    await B(() => { const a = window.__board; a.cam.x = 1e8; a.cam.y = -3e7; a.cameraChanged(); });
+    const st = await B(() => ({ ox: window.__board.origin.x, oy: window.__board.origin.y, cx: window.__board.cam.x, cy: window.__board.cam.y }));
+    assert.ok(Math.abs(st.ox - 1e8) < 2000 && Math.abs(st.oy + 3e7) < 2000, JSON.stringify(st));
+    assert.ok(Math.abs(st.cx) < 2000 && Math.abs(st.cy) < 2000, 'камера вернулась к нулю: ' + JSON.stringify(st));
     await page.keyboard.press('p');
     await pen('mouseMoved', 600, 400, 0);
     await pen('mousePressed', 600, 400, 0.5);
     for (let i = 1; i < 30; i++) await pen('mouseMoved', 600 + i * 8, 400 + i * 2, 0.5);
     await pen('mouseReleased', 840, 460, 0);
     const far = await B(() => window.__board.scene.all().filter((o) => o.type === 'stroke').pop());
-    assert.ok(far.x > 4.9e6 && far.y < -2.9e6, `${far.x},${far.y}`);
+    assert.ok(Math.abs(far.x) < 5000 && Math.abs(far.y) < 5000, `штрих в локальных координатах: ${far.x},${far.y}`);
+    // нарисованное вдали видно: на холсте есть тёмные пиксели возле линии
+    const dark = await B(() => { const g = window.__board.renderer.sceneCv.getContext('2d'); const d = g.getImageData(1300, 760, 120, 120).data; let n = 0; for (let i = 3; i < d.length; i += 4) if (d[i] > 200) n++; return n; });
+    assert.ok(dark > 50, 'штрих отрисован, пикселей: ' + dark);
+    // возвращаемся к стикеру: он на месте с учётом накопленного сдвига
+    await B(() => { const a = window.__board; a.cam.x += -1e8; a.cam.y += 3e7; a.cameraChanged(); });
+    const back = await B((id) => ({ s: window.__board.scene.get(id), o: window.__board.origin }), mark.id);
+    assert.ok(Math.abs(back.s.x + back.o.x - mark.x) < 1e-6, `истинная позиция стикера сохранена: ${back.s.x} + ${back.o.x} против ${mark.x}`);
+    // отмена после переносов начала координат работает
+    await B(() => window.__board.undo());
+    assert.ok((await B(() => window.__board.scene.all().filter((o) => o.type === 'stroke').length)) >= 1);
     await B(() => { const a = window.__board; for (let i = 0; i < 60; i++) a.zoomBy(0.5); });
     assert.ok(Math.abs((await B(() => window.__board.cam.z)) - 0.02) < 1e-9);
     await B(() => { const a = window.__board; for (let i = 0; i < 60; i++) a.zoomBy(2); });

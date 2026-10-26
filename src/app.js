@@ -71,6 +71,7 @@ export class App {
     this.dark = false;
     this.meta = null;
     this.view = 'home';
+    this.origin = { x: 0, y: 0 };
     this.toolName = 'select';
     this.lastDrawTool = 'pen';
     this.diag = { inputToDraw: 0 };
@@ -142,7 +143,7 @@ export class App {
     const bump = this.contentDirty;
     this.contentDirty = false;
     try {
-      const json = this.scene.toJSONString({ camera: this.cam.toJSON() });
+      const json = this.scene.toJSONString({ camera: this.cam.toJSON(), origin: this.origin });
       await this.storage.saveBoard(this.meta.id, json, bump);
     } catch (e) {
       this.dirty = true;
@@ -176,6 +177,7 @@ export class App {
     this.meta = meta;
     this.selection.clear();
     this.scene.load(data.objects || []);
+    this.origin = data.origin ? { x: data.origin.x || 0, y: data.origin.y || 0 } : { x: 0, y: 0 };
     this.history.clear();
     this.cam.w = this.stage.clientWidth;
     this.cam.h = this.stage.clientHeight;
@@ -224,7 +226,40 @@ export class App {
     this.textEditor.position();
     this.ui.cameraChanged();
     if (this.meta && !immediate) { this.dirty = true; this.saveCamSoon(); }
+    this.rebaseIfNeeded();
   }
+
+  // Бесконечность без потери точности. GPU считает координаты в float32, поэтому далеко от (0,0)
+  // линии начинают «дрожать» и ломаться. Когда центр вида уходит от начала координат дальше,
+  // чем на ~2e5 пикселей экрана, сдвигаем всё содержимое и камеру так, чтобы вид снова был около нуля.
+  // Картинка при этом не меняется. this.origin хранит накопленный сдвиг, то есть истинную позицию.
+  rebaseIfNeeded(force = false) {
+    if (this.view !== 'board' || !this.meta) return false;
+    if (this.interacting || this.isEditingText()) return false;
+    const cam = this.cam;
+    const cx = cam.x + cam.w / 2 / cam.z;
+    const cy = cam.y + cam.h / 2 / cam.z;
+    if (!force && Math.hypot(cx, cy) * cam.z < 2e5) return false;
+    const dx = Math.round(cx / 1024) * 1024;
+    const dy = Math.round(cy / 1024) * 1024;
+    if (!dx && !dy) return false;
+    this.scene.shiftAll(dx, dy);
+    this.history.shiftAll(dx, dy);
+    cam.x -= dx;
+    cam.y -= dy;
+    this.origin.x += dx;
+    this.origin.y += dy;
+    if (this.hoverPos) { this.hoverPos.wx -= dx; this.hoverPos.wy -= dy; }
+    this.renderer.cacheCam = null;
+    this.renderer.markScene();
+    this.applyBackground();
+    this.textEditor.position();
+    this.dirty = true;
+    this.saveCamSoon();
+    return true;
+  }
+
+  afterInteraction() { this.rebaseIfNeeded(); }
 
   fitContent() {
     const objs = this.scene.all();

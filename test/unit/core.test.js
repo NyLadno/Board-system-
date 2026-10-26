@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { distToSegment, pointInRotRect, aabbOf, normalizeRect, rectsIntersect } from '../../src/core/geometry.js';
 import { Camera } from '../../src/core/camera.js';
-import { Scene, makeShape, makeConnector, makeSticky, serializeObj } from '../../src/core/scene.js';
+import { Scene, makeShape, makeConnector, makeSticky, serializeObj, shiftObj } from '../../src/core/scene.js';
 import { History } from '../../src/core/history.js';
 import { parseBoardJSON } from '../../src/export.js';
 
@@ -148,4 +148,39 @@ test('parseBoardJSON validates input', () => {
   }));
   assert.equal(ok.objects.length, 1);
   assert.deepEqual(Object.keys(ok.assets), ['a.png']);
+});
+
+test('shiftObj moves shapes, stroke points and free connector ends, but not attached ones', () => {
+  const sh = makeShape('rect', 1000, 2000, 10, 10);
+  shiftObj(sh, 1000, 500);
+  assert.deepEqual([sh.x, sh.y], [0, 1500]);
+  const st = { type: 'stroke', x: 10, y: 20, w: 5, h: 5, pts: [10, 20, 1, 12, 22, 1] };
+  shiftObj(st, 10, 20);
+  assert.deepEqual(st.pts, [0, 0, 1, 2, 2, 1]);
+  const c = makeConnector({ id: 'a', port: 'r' }, { x: 100, y: 50 });
+  shiftObj(c, 100, 50);
+  assert.equal(c.from.id, 'a');
+  assert.deepEqual([c.to.x, c.to.y], [0, 0]);
+});
+
+test('rebasing keeps relative geometry, hits and history consistent', () => {
+  const s = new Scene();
+  const h = new History(s);
+  const D = 123456789;
+  const a = makeShape('rect', D, D, 100, 100);
+  const b = makeShape('rect', D + 300, D, 100, 100);
+  let tx = h.begin();
+  s.add(a, true); s.add(b, true); tx.add(a); tx.add(b); tx.commit();
+  tx = h.begin(); tx.track(a); a.x += 50; tx.commit();
+  const c = s.add(makeConnector({ id: a.id, port: 'r' }, { id: b.id, port: 'l' }, 'straight'));
+  const before = s.route(c).pts.map((v) => v - D);
+  s.shiftAll(D, D);
+  h.shiftAll(D, D);
+  const after = s.route(c).pts;
+  assert.deepEqual(after, before);
+  assert.equal(s.hit(80, 40, 1).id, a.id, 'hit works at the new origin');
+  h.undo();
+  assert.equal(s.get(a.id).x, 0, 'undo restores the pre-edit position in shifted coordinates');
+  h.redo();
+  assert.equal(s.get(a.id).x, 50);
 });

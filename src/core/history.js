@@ -1,4 +1,4 @@
-import { serializeObj } from './scene.js';
+import { serializeObj, shiftObj } from './scene.js';
 
 // Откат и повтор на основе снимков изменённых объектов.
 // tx = history.begin(); tx.track(obj) ПЕРЕД изменением; tx.add(obj) для новых;
@@ -35,6 +35,18 @@ export class History {
   dropLast(id) {
     const e = this.undoStack[this.undoStack.length - 1];
     if (e && e.length === 1 && e[0].id === id && !e[0].before) { this.undoStack.pop(); this.fire(); }
+  }
+
+  // Снимки в истории хранят координаты, поэтому при переносе начала координат их тоже нужно сдвинуть
+  shiftAll(dx, dy) {
+    for (const stack of [this.undoStack, this.redoStack]) {
+      for (const entry of stack) {
+        for (const ch of entry) {
+          if (ch.before) shiftObj(ch.before, dx, dy);
+          if (ch.after) shiftObj(ch.after, dx, dy);
+        }
+      }
+    }
   }
 
   canUndo() { return this.undoStack.length > 0; }
