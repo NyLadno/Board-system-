@@ -6,6 +6,7 @@ import { ContextPanel, swatches, slider } from './panel.js';
 import { PALETTE, STICKY_COLORS } from '../core/scene.js';
 import { SHAPES } from '../render/draw.js';
 import { TEMPLATES } from '../templates.js';
+import { keys } from '../platform.js';
 import { LOOKS } from '../looks.js';
 import { Scene } from '../core/scene.js';
 
@@ -52,8 +53,8 @@ export class UI {
       this.nameInput);
 
     // верхняя правая плашка
-    this.undoBtn = h('button', { class: 'tb', title: t('undo') + ' ⌘Z', html: icon('undo', 18), onclick: () => app.undo() });
-    this.redoBtn = h('button', { class: 'tb', title: t('redo') + ' ⇧⌘Z', html: icon('redo', 18), onclick: () => app.redo() });
+    this.undoBtn = h('button', { class: 'tb', title: t('undo') + ' ' + keys('⌘Z'), html: icon('undo', 18), onclick: () => app.undo() });
+    this.redoBtn = h('button', { class: 'tb', title: t('redo') + ' ' + keys('⇧⌘Z'), html: icon('redo', 18), onclick: () => app.redo() });
     const exportBtn = h('button', { class: 'tb wide', title: t('export'), html: icon('export', 18) + `<span>${t('export')}</span>` });
     exportBtn.addEventListener('click', () => {
       const menu = h('div', { class: 'menu' },
@@ -665,6 +666,7 @@ export class UI {
       row(t('pressure'), num('pressure', 0, 100, 5, 100)),
       row(t('smoothing'), num('smoothing', 0, 100, 5, 100), t('smoothingHint')),
       row(t('prediction'), num('predictMs', 0, 40, 1), t('predictionHint')),
+      row(t('inkTrail'), toggle('inkTrail'), t('inkTrailHint')),
       row(t('palm'), toggle('palmRejection')),
       row(t('touchDraw'), toggle('touchDraw')),
       h('h3', null, t('background')),
@@ -682,7 +684,7 @@ export class UI {
       row(t('language'), select('lang', [['ru', 'Русский'], ['en', 'English']])),
       row(t('diag'), toggle('diag')),
       h('h3', null, t('shortcuts')),
-      h('div', { class: 'keys' }, list('keys').map(([k, d]) => h('div', { class: 'krow' }, h('kbd', null, k), h('span', null, d)))));
+      h('div', { class: 'keys' }, list('keys').map(([k, d]) => h('div', { class: 'krow' }, h('kbd', null, keys(k)), h('span', null, d)))));
     const back = h('div', { class: 'backdrop' }, modal);
     back.addEventListener('pointerdown', (e) => { if (e.target === back) close(); });
     modal.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); e.stopPropagation(); });

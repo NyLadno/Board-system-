@@ -17,11 +17,16 @@ async function step(name, fn) {
 (async () => {
   const server = await start(5199);
   const browser = await chromium.launch();
-  const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2 });
+  const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: Number(process.env.DPR) || 2 });
   const errors = [];
   page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
   page.on('pageerror', (e) => errors.push('pageerror: ' + e.stack));
   page.on('dialog', (d) => d.accept());
+  // имитация Windows-API системного следа пера: проверяем, что приложение вызывает его с верными параметрами
+  await page.addInitScript(() => {
+    window.__trail = [];
+    Object.defineProperty(navigator, 'ink', { value: { requestPresenter: async () => ({ updateInkTrailStartPoint: (e, st) => window.__trail.push({ type: e.type, trusted: e.isTrusted, ...st }) }) } });
+  });
   const cdp = await page.context().newCDPSession(page);
   const pen = (type, x, y, force) => cdp.send('Input.dispatchMouseEvent', {
     type, x, y, button: force || type === 'mouseReleased' ? 'left' : 'none', buttons: force ? 1 : 0, pointerType: 'pen', force: force || 0, clickCount: type === 'mouseMoved' ? 0 : 1,
@@ -101,6 +106,31 @@ async function step(name, fn) {
     assert.ok(o.n > 30, 'points ' + o.n);
     assert.equal(o.v, true);
     assert.ok(o.r1 > o.r0 * 1.35, `radius should grow with pressure: ${o.r0} -> ${o.r1}`);
+  });
+
+  await step('Windows: системный след пера вызывается с цветом и толщиной штриха', async () => {
+    await B(() => { window.__board.settings.inkTrail = true; window.__board.defaults.pen.size = 6; });
+    await page.keyboard.press('p');
+    await pen('mouseMoved', 400, 700, 0);
+    await pen('mousePressed', 400, 700, 0.5);
+    for (let i = 1; i <= 15; i++) await pen('mouseMoved', 400 + i * 9, 700 + i * 2, 0.5);
+    await pen('mouseReleased', 535, 730, 0);
+    const trail = await B(() => window.__trail.slice());
+    assert.ok(trail.length >= 10, 'вызовов: ' + trail.length);
+    assert.ok(trail.every((t) => t.type === 'pointermove' && t.trusted), 'только доверенные pointermove');
+    const last = trail[trail.length - 1];
+    assert.equal(last.color, '#1a1a1a');
+    assert.ok(last.diameter > 4 && last.diameter < 14, 'диаметр ' + last.diameter);
+    // выключатель в настройках работает
+    await B(() => { window.__trail.length = 0; window.__board.settings.inkTrail = false; });
+    await pen('mouseMoved', 400, 600, 0);
+    await pen('mousePressed', 400, 600, 0.5);
+    for (let i = 1; i <= 5; i++) await pen('mouseMoved', 400 + i * 9, 600, 0.5);
+    await pen('mouseReleased', 445, 600, 0);
+    assert.equal(await B(() => window.__trail.length), 0);
+    await B(() => { window.__board.defaults.pen.size = 3; });
+    // убрать эти два штриха, чтобы не мешать следующим шагам
+    await B(() => { window.__board.undo(); window.__board.undo(); });
   });
 
   await step('ластик удаляет штрих, отмена возвращает', async () => {
@@ -342,8 +372,12 @@ async function step(name, fn) {
       return { moved, diff: diff / quick.length };
     });
     assert.equal(shifted.moved.renders, 0, 'перерисовки не было: ' + JSON.stringify(shifted.moved));
-    assert.ok(shifted.moved.transform.includes('translate3d(-120px, -70px'), shifted.moved.transform);
-    assert.ok(shifted.diff < 0.002, 'сдвинутый слой совпадает с перерисованным: ' + shifted.diff);
+    // сдвиг кратен физическому пикселю: при масштабе 125% это не ровно 120 и 70 пикселей
+    const mt = shifted.moved.transform.match(/translate3d\(([-\d.]+)px, ([-\d.]+)px/);
+    const dprNow = Number(process.env.DPR) || 2;
+    assert.ok(mt && Math.abs(Number(mt[1]) + 120) <= 0.5 / dprNow + 1e-9 && Math.abs(Number(mt[2]) + 70) <= 0.5 / dprNow + 1e-9, shifted.moved.transform);
+    // при дробном масштабе (Windows 125, 150, 175%) сдвиг округляется до физического пикселя: допускаем расхождение на краях линий
+    assert.ok(shifted.diff < (Number.isInteger(dprNow) ? 0.002 : 0.02), 'сдвинутый слой совпадает с перерисованным: ' + shifted.diff);
     // большой сдвиг: запас по краям кончился, слой перерисован под новую камеру
     const far = await B(async () => {
       const a = window.__board, r = a.renderer;

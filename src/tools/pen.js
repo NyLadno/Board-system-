@@ -1,6 +1,11 @@
 import { StrokeBuilder } from '../render/stroke.js';
 import { uid } from '../core/util.js';
 
+function hexToRgba(hex, a) {
+  const n = parseInt(hex.slice(1), 16);
+  return `rgba(${n >> 16}, ${(n >> 8) & 255}, ${n & 255}, ${a})`;
+}
+
 // Перо и маркер. Главное для отклика:
 //  1. точки берутся из coalesced-событий (все отсчёты планшета, а не только по одному на кадр);
 //  2. на кадр рисуется только хвост штрих-а, остальное лежит в готовом слое;
@@ -14,6 +19,29 @@ export class PenTool {
     this.sb = null;
     this.pid = null;
     this.lastT = -1;
+    this.presenter = null;
+    this.initTrail();
+  }
+
+  // Системный след пера (delegated ink trail): на Windows композитор дорисовывает хвост линии от последней
+  // точки, которую успело нарисовать приложение, до актуального положения пера. Это убирает видимую задержку.
+  // Вне Windows API либо отсутствует, либо ничего не делает.
+  async initTrail() {
+    try {
+      if (typeof navigator !== 'undefined' && navigator.ink && navigator.ink.requestPresenter) {
+        this.presenter = await navigator.ink.requestPresenter({ presentationArea: this.app.stage });
+      }
+    } catch { this.presenter = null; }
+  }
+
+  updateTrail(e) {
+    const p = this.presenter, sb = this.sb;
+    if (!p || !sb || !this.app.settings.inkTrail || !e) return;
+    const st = this.style;
+    const w = (st.variable ? sb.R[sb.length - 1] * 2 : st.size) * this.app.cam.z;
+    try {
+      p.updateInkTrailStartPoint(e, { color: st.hl ? hexToRgba(st.color, 0.38) : st.color, diameter: Math.max(1, w) });
+    } catch { this.presenter = null; }
   }
 
   get cursor() { return this.app.brushCursor(this.kind); }
@@ -61,6 +89,7 @@ export class PenTool {
     const list = ev.coalesced && ev.coalesced.length ? ev.coalesced : [ev.raw];
     for (let i = 0; i < list.length; i++) this.addRaw(list[i]);
     this.drawNow();
+    this.updateTrail(list[list.length - 1]);
     this.app.renderer.schedule();
   }
 

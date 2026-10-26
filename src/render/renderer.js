@@ -41,18 +41,21 @@ export class Renderer {
   }
 
   resize() {
-    const w = this.stage.clientWidth || 800;
-    const h = this.stage.clientHeight || 600;
+    // размеры берём дробными: при масштабе Windows 125 или 150% целые clientWidth дают сдвиг и мыло на краях
+    const box = this.stage.getBoundingClientRect();
+    const w = box.width || 800;
+    const h = box.height || 600;
     const dpr = window.devicePixelRatio || 1;
     this.dpr = dpr;
     this.app.cam.w = w;
     this.app.cam.h = h;
-    const M = Math.max(120, Math.min(320, Math.round(0.22 * Math.max(w, h))));
+    // запас кратен физическому пикселю, иначе слой сцены окажется между пикселями
+    const M = Math.round(Math.max(120, Math.min(320, 0.22 * Math.max(w, h))) * dpr) / dpr;
     this.margin = M;
     const sc = this.sceneCv;
     sc.width = Math.round((w + 2 * M) * dpr);
     sc.height = Math.round((h + 2 * M) * dpr);
-    Object.assign(sc.style, { left: -M + 'px', top: -M + 'px', width: w + 2 * M + 'px', height: h + 2 * M + 'px', transformOrigin: `${M}px ${M}px` });
+    Object.assign(sc.style, { left: -M + 'px', top: -M + 'px', width: sc.width / dpr + 'px', height: sc.height / dpr + 'px', transformOrigin: `${M}px ${M}px` });
     this.uiCv.width = Math.round(w * dpr);
     this.uiCv.height = Math.round(h * dpr);
     this.ink.resize(w, h, dpr);

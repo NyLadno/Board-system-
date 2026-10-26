@@ -26,6 +26,8 @@ const DEFAULT_SETTINGS = {
   pressure: 0.65,
   smoothing: 0.35,
   predictMs: 14,
+  // системный след пера действует только на Windows; в настройках можно выключить
+  inkTrail: (window.boardAPI ? window.boardAPI.platform === 'win32' : /Win/.test(navigator.platform)),
   palmRejection: true,
   touchDraw: false,
   theme: 'auto',

@@ -1,4 +1,4 @@
-name: Build macOS app
+name: Build apps
 
 on:
   workflow_dispatch:
@@ -22,3 +22,19 @@ jobs:
           path: |
             dist/*.dmg
             dist/*.zip
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-audit --no-fund
+      # установщик NSIS для x64 и ARM64 и переносная версия без установки
+      - run: npx electron-builder --win --publish never
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Board-Windows
+          path: |
+            dist/*.exe

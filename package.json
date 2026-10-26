@@ -10,7 +10,9 @@
     "dev": "node test/serve.js",
     "test": "node --test \"test/unit/*.test.js\"",
     "test:e2e": "node test/e2e.js",
-    "dist": "electron-builder --mac --universal"
+    "dist": "electron-builder --mac --universal",
+    "dist:mac": "electron-builder --mac --universal",
+    "dist:win": "electron-builder --win"
   },
   "devDependencies": {
     "electron": "38.8.6",
@@ -20,12 +22,51 @@
   "build": {
     "appId": "dev.nyladno.board",
     "productName": "Board",
-    "files": ["main.js", "preload.js", "src/**/*", "build/**/*", "package.json"],
+    "files": [
+      "main.js",
+      "preload.js",
+      "src/**/*",
+      "build/**/*",
+      "package.json"
+    ],
     "mac": {
       "category": "public.app-category.productivity",
       "minimumSystemVersion": "12.0.0",
-      "target": ["dmg", "zip"],
-      "identity": null
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "identity": null,
+      "artifactName": "Board-${version}-${arch}.${ext}"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "artifactName": "Board-Setup-${version}-${arch}.${ext}"
+    },
+    "portable": {
+      "artifactName": "Board-Portable-${version}.${ext}"
     }
   },
   "license": "MIT"

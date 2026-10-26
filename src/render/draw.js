@@ -1,10 +1,10 @@
 import { buildOutline, buildPolyline, flatToArrays } from './stroke.js';
 
 const FONTS = {
-  sans: '-apple-system, "SF Pro Text", "Helvetica Neue", Helvetica, Arial, sans-serif',
-  serif: '"New York", "Times New Roman", Georgia, serif',
-  mono: '"SF Mono", Menlo, Consolas, monospace',
-  hand: '"Marker Felt", "Bradley Hand", "Segoe Print", "Comic Sans MS", cursive',
+  sans: '-apple-system, "SF Pro Text", "Segoe UI Variable Text", "Segoe UI", "Helvetica Neue", Helvetica, Arial, sans-serif',
+  serif: '"New York", Cambria, "Times New Roman", Georgia, serif',
+  mono: '"SF Mono", Menlo, "Cascadia Mono", Consolas, monospace',
+  hand: '"Marker Felt", "Bradley Hand", "Ink Free", "Segoe Print", "Comic Sans MS", cursive',
 };
 export const LINE_H = 1.25;
 

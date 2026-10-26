@@ -15,7 +15,13 @@ const safeId = (id) => {
 async function atomicWrite(file, data) {
   const tmp = file + '.tmp';
   await fsp.writeFile(tmp, data);
-  await fsp.rename(tmp, file);
+  // На Windows rename может на мгновение упасть, если файл держит антивирус или индексатор
+  for (let i = 0; ; i++) {
+    try { await fsp.rename(tmp, file); return; } catch (e) {
+      if (i >= 6 || !['EPERM', 'EBUSY', 'EACCES'].includes(e.code)) throw e;
+      await new Promise((r) => setTimeout(r, 40 * (i + 1)));
+    }
+  }
 }
 
 function registerIpc() {
@@ -195,7 +201,11 @@ function buildMenu() {
         { label: 'Открыть файл доски…', click: send('import-json') },
         { type: 'separator' },
         { label: 'Вставить изображение…', accelerator: 'CmdOrCtrl+Shift+I', click: send('add-image') },
-        ...(isMac ? [] : [{ role: 'quit' }]),
+        ...(isMac ? [] : [
+          { label: 'Настройки…', accelerator: 'Ctrl+,', click: send('settings') },
+          { type: 'separator' },
+          { role: 'quit' },
+        ]),
       ],
     },
     {
@@ -216,6 +226,8 @@ function buildMenu() {
       label: 'Вид',
       submenu: [
         { label: 'Увеличить', accelerator: 'CmdOrCtrl+=', click: send('zoom-in') },
+        { label: 'Увеличить (цифровая клавиатура)', accelerator: 'CmdOrCtrl+numadd', click: send('zoom-in'), visible: false },
+        { label: 'Уменьшить (цифровая клавиатура)', accelerator: 'CmdOrCtrl+numsub', click: send('zoom-out'), visible: false },
         { label: 'Уменьшить', accelerator: 'CmdOrCtrl+-', click: send('zoom-out') },
         { label: 'Масштаб 100%', accelerator: 'CmdOrCtrl+0', click: send('zoom-100') },
         { label: 'Показать всё', accelerator: 'CmdOrCtrl+1', click: send('zoom-fit') },
@@ -232,8 +244,14 @@ function buildMenu() {
 }
 
 if (process.env.BOARD_USER_DATA) app.setPath('userData', process.env.BOARD_USER_DATA);
+if (process.platform === 'win32') app.setAppUserModelId('dev.nyladno.board');
 
-app.whenReady().then(() => {
+// Одна копия приложения на пользователя: две копии портили бы друг другу файлы досок
+const gotLock = process.env.BOARD_SMOKE ? true : app.requestSingleInstanceLock();
+if (!gotLock) app.quit();
+else app.on('second-instance', () => { if (win) { if (win.isMinimized()) win.restore(); win.focus(); } });
+
+if (gotLock) app.whenReady().then(() => {
   registerIpc();
   buildMenu();
   if (process.platform === 'darwin' && app.dock) { try { app.dock.setIcon(path.join(__dirname, 'build', 'icon.png')); } catch { /* значок по умолчанию */ } }
