@@ -683,6 +683,9 @@ export class UI {
       row(t('theme'), select('theme', [['auto', t('themeAuto')], ['light', t('themeLight')], ['dark', t('themeDark')]])),
       row(t('language'), select('lang', [['ru', 'Русский'], ['en', 'English']])),
       row(t('diag'), toggle('diag')),
+      h('h3', null, t('backup')),
+      row(t('backupSave'), h('button', { class: 'tb wide', onclick: () => app.exportBackup() }, t('backupSaveBtn')), t('backupHint')),
+      row(t('backupRestore'), h('button', { class: 'tb wide', onclick: () => app.restoreBackupFile() }, t('backupRestoreBtn'))),
       h('h3', null, t('shortcuts')),
       h('div', { class: 'keys' }, list('keys').map(([k, d]) => h('div', { class: 'krow' }, h('kbd', null, keys(k)), h('span', null, d)))));
     const back = h('div', { class: 'backdrop' }, modal);

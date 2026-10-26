@@ -661,6 +661,85 @@ async function step(name, fn) {
     await page.screenshot({ path: path.join(OUT, 'final.png') });
   });
 
+  // ---- установка как приложение: манифест, сервис-воркер, работа без сети, резервная копия ----
+  await step('PWA: устанавливается, сервис-воркер кэширует, без сети всё работает', async () => {
+    const pwa = await browser.newPage({ viewport: { width: 1200, height: 800 } });
+    const perrs = [];
+    pwa.on('pageerror', (e) => perrs.push(e.stack));
+    await pwa.goto('http://localhost:5199/');
+    await pwa.evaluate(() => navigator.serviceWorker.ready);
+    await pwa.waitForFunction(() => navigator.serviceWorker.controller || true);
+    await pwa.reload(); // после перезагрузки страница уже под управлением воркера
+    await pwa.waitForFunction(() => !!navigator.serviceWorker.controller, null, { timeout: 8000 });
+    const c = await pwa.context().newCDPSession(pwa);
+    const inst = await c.send('Page.getInstallabilityErrors');
+    assert.deepEqual(inst.installabilityErrors.map((e) => e.errorId), [], 'ошибки установки: ' + JSON.stringify(inst.installabilityErrors));
+    const cached = await pwa.evaluate(async () => (await (await caches.open('board-v1')).keys()).length);
+    assert.ok(cached >= 30, 'в кэше файлов: ' + cached);
+    // полностью без сети: перезагрузка, создание доски и рисование
+    await pwa.context().setOffline(true);
+    await pwa.reload();
+    await pwa.waitForSelector('.primary', { timeout: 8000 });
+    await pwa.click('.primary');
+    await pwa.click('.tpl-card[data-tpl="blank"]');
+    await pwa.waitForTimeout(400);
+    await pwa.keyboard.press('p');
+    await pwa.mouse.move(400, 400); await pwa.mouse.down(); await pwa.mouse.move(520, 450, { steps: 8 }); await pwa.mouse.up();
+    assert.equal(await pwa.evaluate(() => window.__board.scene.all().length), 1, 'офлайн рисование работает');
+    await pwa.context().setOffline(false);
+    assert.deepEqual(perrs, []);
+    await pwa.close();
+  });
+
+  await step('резервная копия: все доски в один файл и восстановление с картинками', async () => {
+    const bk = await browser.newPage({ viewport: { width: 1200, height: 800 } });
+    const perrs = [];
+    bk.on('pageerror', (e) => perrs.push(e.stack));
+    await bk.goto('http://localhost:5199/');
+    await bk.waitForSelector('.primary');
+    const r = await bk.evaluate(async () => {
+      const a = window.__board;
+      const m = await import('/export.js');
+      const { makeShape } = await import('/core/scene.js');
+      // две доски: в одной картинка и фигура, в другой пусто
+      const m1 = await a.storage.createBoard('Первая');
+      await a.openBoard(m1.id);
+      a.view = 'board';
+      const cv = document.createElement('canvas'); cv.width = 40; cv.height = 30;
+      cv.getContext('2d').fillStyle = '#e03131'; cv.getContext('2d').fillRect(0, 0, 40, 30);
+      await a.addImageFile(await new Promise((res) => cv.toBlob(res, 'image/png')), { x: 0, y: 0 });
+      const sh = makeShape('rect', 200, 0, 100, 60); sh.text = 'Привет'; a.scene.add(sh);
+      a.boardBg = 'cells'; a.boardBgColor = '#fff8e1';
+      await a.closeBoard();
+      await a.storage.createBoard('Вторая');
+      const before = (await a.storage.listBoards()).length;
+      const { json, count } = await m.exportBackupJSON(a);
+      // удаляем всё и восстанавливаем
+      for (const b of await a.storage.listBoards()) await a.storage.deleteBoard(b.id);
+      const emptied = (await a.storage.listBoards()).length;
+      const n = await m.restoreBackup(a, json);
+      const boards = await a.storage.listBoards();
+      const first = boards.find((b) => b.name === 'Первая');
+      const loaded = await a.storage.loadBoard(first.id);
+      const img = loaded.data.objects.find((o) => o.type === 'image');
+      const blob = await a.storage.getAssetBlob(img.assetId);
+      let bad = null;
+      try { await m.restoreBackup(a, '{"app":"x"}'); } catch (e) { bad = 'threw'; }
+      return { before, count, emptied, n, names: boards.map((b) => b.name).sort(), objs: loaded.data.objects.map((o) => o.type).sort(), imgSize: blob.size, bg: loaded.data.bg, bgColor: loaded.data.bgColor, bad };
+    });
+    assert.equal(r.count, r.before);
+    assert.equal(r.emptied, 0);
+    assert.equal(r.n, 2);
+    assert.deepEqual(r.names, ['Вторая', 'Первая']);
+    assert.deepEqual(r.objs, ['image', 'shape']);
+    assert.ok(r.imgSize > 50, 'картинка восстановлена: ' + r.imgSize);
+    assert.equal(r.bg, 'cells');
+    assert.equal(r.bgColor, '#fff8e1');
+    assert.equal(r.bad, 'threw');
+    assert.deepEqual(perrs, []);
+    await bk.close();
+  });
+
   console.log(errors.length ? 'Ошибки консоли:\n' + errors.join('\n') : 'Ошибок консоли нет');
   if (errors.length) process.exitCode = 1;
   console.log(`${passed} шагов пройдено`);

@@ -15,7 +15,7 @@ import { uid, debounce, download } from './core/util.js';
 import { textObjectHeight } from './render/draw.js';
 import { isDarkColor, INK_ON_DARK, INK_ON_LIGHT } from './looks.js';
 import { PALETTE } from './core/scene.js';
-import { exportPNGBlob, exportSVGString, exportPDFBytes, exportBoardJSON, parseBoardJSON } from './export.js';
+import { exportPNGBlob, exportSVGString, exportPDFBytes, exportBoardJSON, parseBoardJSON, exportBackupJSON, restoreBackup } from './export.js';
 
 function hexToRgba(hex, a) {
   const n = parseInt(hex.slice(1), 16);
@@ -118,6 +118,8 @@ export class App {
     this.applyTheme();
     this.applyBackground();
     this.bindGlobal();
+    // в браузере просим не вытеснять данные досок при нехватке места (у установленного приложения это обычно разрешено сразу)
+    if (!window.boardAPI && navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
     this.scene.on((kind) => this.onSceneEvent(kind));
     this.history.onChange(() => this.ui.updateHistory());
     window.__board = this; // для тестов и отладки
@@ -852,6 +854,38 @@ export class App {
       console.error(e);
       this.ui.toast(t('pdfFail'));
     }
+  }
+
+  async exportBackup() {
+    // сначала сохраняем открытую доску, чтобы копия была свежей
+    this.forceSave = true;
+    await this.saveNow();
+    this.forceSave = false;
+    const { json, count } = await exportBackupJSON(this);
+    if (!count) { this.ui.toast(t('backupEmpty')); return; }
+    const d = new Date();
+    const stamp = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    download(new Blob([json], { type: 'application/json' }), `board-backup-${stamp}.json`);
+    this.ui.toast(t('backupSaved', { n: count }));
+  }
+
+  restoreBackupFile() {
+    const inp = document.createElement('input');
+    inp.type = 'file';
+    inp.accept = '.json,application/json';
+    inp.onchange = async () => {
+      const f = inp.files[0];
+      if (!f) return;
+      try {
+        const n = await restoreBackup(this, await f.text());
+        this.ui.toast(t('backupRestored', { n }));
+        if (this.view === 'home') this.ui.renderHome();
+      } catch (e) {
+        console.error(e);
+        this.ui.toast(t('backupFail'));
+      }
+    };
+    inp.click();
   }
 
   async exportJSON() {

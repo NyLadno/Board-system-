@@ -56,7 +56,7 @@ function dashAttr(dash, sw) {
   return '';
 }
 
-async function blobToDataURL(blob) {
+export async function blobToDataURL(blob) {
   return new Promise((res, rej) => {
     const r = new FileReader();
     r.onload = () => res(r.result);
@@ -182,4 +182,42 @@ export function parseBoardJSON(text) {
   const bg = ['dots', 'grid', 'cells', 'none'].includes(d.bg) ? d.bg : null;
   const hex = (v) => (typeof v === 'string' && /^#[0-9a-f]{6}$/i.test(v) ? v : null);
   return { name: typeof d.name === 'string' ? d.name.slice(0, 120) : null, objects, assets, bg, bgColor: hex(d.bgColor), lineColor: hex(d.lineColor) };
+}
+
+// ---- резервная копия всех досок одним файлом ----
+export async function exportBackupJSON(app) {
+  const boards = [];
+  for (const m of await app.storage.listBoards()) {
+    const { data } = await app.storage.loadBoard(m.id);
+    const assets = {};
+    for (const o of data.objects || []) {
+      if (o.assetId && !assets[o.assetId]) {
+        try { assets[o.assetId] = await blobToDataURL(await app.storage.getAssetBlob(o.assetId)); } catch { /* картинки нет: пропускаем */ }
+      }
+    }
+    boards.push({ name: m.name, created: m.created, updated: m.updated, data, assets });
+  }
+  return { json: JSON.stringify({ app: 'board-system', kind: 'backup', v: 1, boards }), count: boards.length };
+}
+
+// Восстановление добавляет доски как новые, ничего не затирая. Возвращает число восстановленных досок.
+export async function restoreBackup(app, text) {
+  const d = JSON.parse(text);
+  if (!d || d.app !== 'board-system' || d.kind !== 'backup' || !Array.isArray(d.boards)) throw new Error('not a backup');
+  let n = 0;
+  for (const b of d.boards) {
+    if (!b || !b.data) continue;
+    const parsed = parseBoardJSON(JSON.stringify({ app: 'board-system', name: b.name, objects: b.data.objects, assets: b.assets, bg: b.data.bg, bgColor: b.data.bgColor, lineColor: b.data.lineColor }));
+    const meta = await app.storage.createBoard(parsed.name || 'Board');
+    for (const [oldId, dataUrl] of Object.entries(parsed.assets)) {
+      const newId = await app.storage.putAsset(await (await fetch(dataUrl)).blob());
+      for (const o of parsed.objects) if (o.assetId === oldId) o.assetId = newId;
+    }
+    await app.storage.saveBoard(meta.id, JSON.stringify({
+      v: 1, objects: parsed.objects, camera: b.data.camera || null, origin: b.data.origin || { x: 0, y: 0 },
+      bg: parsed.bg, bgColor: parsed.bgColor, lineColor: parsed.lineColor,
+    }), false);
+    n++;
+  }
+  return n;
 }
