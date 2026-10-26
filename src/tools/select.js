@@ -56,6 +56,7 @@ export class SelectTool {
     this.marquee = null;
     this.snapTarget = null;
     this.cursorOverride = null;
+    this._hoverAt = 0;
   }
 
   get cursor() { return this.cursorOverride || 'default'; }
@@ -519,6 +520,10 @@ export class SelectTool {
   // ---------- наведение ----------
   hover(ev) {
     const app = this.app;
+    // перо в воздухе шлёт сотни событий в секунду: поиск объекта под курсором нужен не чаще ~30 раз в секунду
+    const now = performance.now();
+    if (now - this._hoverAt < 33) return;
+    this._hoverAt = now;
     const f = selectionFrame(app);
     let cursor = null;
     if (f && !app.selectedObjs().some((o) => o.locked)) {

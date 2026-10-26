@@ -367,6 +367,53 @@ async function step(name, fn) {
     await page.screenshot({ path: path.join(OUT, 'pan.png') });
   });
 
+  await step('только перо: боковая кнопка двигает доску, масштаб перетаскиванием, ползунок', async () => {
+    await page.keyboard.press('p'); // активное перо: рисовать должно только остриё без кнопки
+    const strokes0 = await B(() => window.__board.scene.all().filter((o) => o.type === 'stroke').length);
+    const cam0 = await B(() => ({ x: window.__board.cam.x, y: window.__board.cam.y, z: window.__board.cam.z }));
+    // Боковая кнопка зажата в воздухе (pointerdown с button=2), затем перо касается и ведёт: buttons = 2 или 3
+    const penB = (type, x, y, buttons, button = 'left') => cdp.send('Input.dispatchMouseEvent', { type, x, y, button, buttons, pointerType: 'pen', force: 0.5, clickCount: 1 });
+    await penB('mouseMoved', 600, 400, 0, 'none');
+    await penB('mousePressed', 600, 400, 2, 'right');
+    for (let i = 1; i <= 10; i++) await penB('mouseMoved', 600 + i * 10, 400 + i * 5, i > 5 ? 3 : 2, 'right');
+    await penB('mouseReleased', 700, 450, 0, 'right');
+    const cam1 = await B(() => ({ x: window.__board.cam.x, y: window.__board.cam.y }));
+    assert.ok(Math.abs(cam1.x - (cam0.x - 100 / cam0.z)) < 1e-6 && Math.abs(cam1.y - (cam0.y - 50 / cam0.z)) < 1e-6, JSON.stringify([cam0, cam1]));
+    assert.equal(await B(() => window.__board.scene.all().filter((o) => o.type === 'stroke').length), strokes0, 'кнопка пера не должна рисовать');
+    // масштаб: удерживаем Z и ведём пером вверх
+    const z0 = await B(() => window.__board.cam.z);
+    await page.keyboard.down('KeyZ');
+    await penB('mouseMoved', 700, 450, 0, 'none');
+    await penB('mousePressed', 700, 450, 1);
+    for (let i = 1; i <= 10; i++) await penB('mouseMoved', 700, 450 - i * 10, 1);
+    await penB('mouseReleased', 700, 350, 0);
+    await page.keyboard.up('KeyZ');
+    const z1 = await B(() => window.__board.cam.z);
+    assert.ok(z1 > z0 * 1.8, `приближение пером: ${z0} -> ${z1}`);
+    assert.equal(await B(() => window.__board.scene.all().filter((o) => o.type === 'stroke').length), strokes0, 'масштабирование не рисует');
+    // Пробел + Ctrl и движение вниз отдаляет
+    // события мыши через CDP не знают о нажатых клавишах, поэтому модификатор Ctrl (2) передаём явно
+    const penC = (type, x, y, buttons, button = 'left') => cdp.send('Input.dispatchMouseEvent', { type, x, y, button, buttons, modifiers: 2, pointerType: 'pen', force: 0.5, clickCount: 1 });
+    await page.keyboard.down('Control'); await page.keyboard.down('Space');
+    await penC('mouseMoved', 700, 450, 0, 'none');
+    await penC('mousePressed', 700, 450, 1);
+    for (let i = 1; i <= 10; i++) await penC('mouseMoved', 700, 450 + i * 10, 1);
+    await penC('mouseReleased', 700, 550, 0);
+    await page.keyboard.up('Space'); await page.keyboard.up('Control');
+    const z2 = await B(() => window.__board.cam.z);
+    assert.ok(z2 < z1 * 0.7, `отдаление: ${z1} -> ${z2}`);
+    // ползунок масштаба
+    await B(() => { const sl = document.querySelector('.zoom-range'); sl.value = String(Math.log(2)); sl.dispatchEvent(new Event('input', { bubbles: true })); });
+    await page.waitForTimeout(80);
+    assert.ok(Math.abs((await B(() => window.__board.cam.z)) - 2) < 0.02); // ползунок шагает по логарифмической сетке
+    assert.equal(await B(() => document.querySelector('.zoom-label').textContent), '200%');
+    // русская раскладка: «з» на физической клавише P включает перо, «в» на D остаётся только с ⌘
+    await page.keyboard.press('v');
+    await B(() => window.__board.onKey({ code: 'KeyP', key: 'з', metaKey: false, ctrlKey: false, altKey: false, preventDefault() {} }));
+    assert.equal(await B(() => window.__board.toolName), 'pen');
+    await B(() => { window.__board.cam.z = 1; window.__board.cameraChanged(true); });
+  });
+
   await step('колесо: масштаб вокруг курсора и панорамирование трекпадом', async () => {
     await B(() => { const a = window.__board; a.cam.z = 1; a.cam.x = 0; a.cam.y = 0; a.cameraChanged(); });
     const w0 = await B(() => window.__board.cam.toWorld(700, 400));

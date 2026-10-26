@@ -980,7 +980,8 @@ export class App {
   onKey(e) {
     if (this.view !== 'board') return;
     const mod = e.metaKey || e.ctrlKey;
-    const k = e.key.toLowerCase();
+    // по физической клавише, чтобы буквенные сочетания работали на русской раскладке
+    const k = /^Key[A-Z]$/.test(e.code) ? e.code.slice(3).toLowerCase() : e.key.toLowerCase();
     if (mod) {
       switch (k) {
         case 'z': e.preventDefault(); return e.shiftKey ? this.redo() : this.undo();

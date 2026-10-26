@@ -91,10 +91,21 @@ export class UI {
 
     // масштаб
     this.zoomLabel = h('button', { class: 'tb wide zoom-label', title: '100%', onclick: () => app.zoomTo(1) }, '100%');
+    // Ползунок масштаба нужен тем, у кого только перо: логарифмическая шкала от 2% до 3200%
+    this.zoomSlider = h('input', { type: 'range', class: 'range zoom-range', min: String(Math.log(0.02)), max: String(Math.log(32)), step: '0.005', title: t('zoomSlider') });
+    this.zoomSlider.addEventListener('input', () => {
+      app.cam.setZoomCentered(Math.exp(Number(this.zoomSlider.value)));
+      app.cameraMoved();
+    });
+    this.zoomSlider.addEventListener('pointerdown', () => { app.interacting = true; });
+    const sliderDone = () => { app.interacting = false; app.afterInteraction(); };
+    this.zoomSlider.addEventListener('pointerup', sliderDone);
+    this.zoomSlider.addEventListener('pointercancel', sliderDone);
     this.bottomLeft = h('div', { class: 'bar bottom-left' },
       h('button', { class: 'tb', title: t('zoomOut'), html: icon('minus', 18), onclick: () => app.zoomBy(0.8) }),
-      this.zoomLabel,
+      this.zoomSlider,
       h('button', { class: 'tb', title: t('zoomIn'), html: icon('plus', 18), onclick: () => app.zoomBy(1.25) }),
+      this.zoomLabel,
       h('button', { class: 'tb', title: t('fit'), html: icon('fit', 18), onclick: () => app.fitContent() }));
 
     // мини-карта
@@ -134,6 +145,8 @@ export class UI {
   cameraChanged() {
     const label = Math.round(this.app.cam.z * 100) + '%';
     if (this.zoomLabel.textContent !== label) this.zoomLabel.textContent = label;
+    if (this.zoomSlider && document.activeElement !== this.zoomSlider) this.zoomSlider.value = String(Math.log(this.app.cam.z));
+    
     this.panelDirty = true;
     this.scheduleMini();
     closePopover();

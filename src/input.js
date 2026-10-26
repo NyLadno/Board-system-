@@ -30,7 +30,7 @@ export class Input {
     stage.addEventListener('pointerleave', (e) => { if (!this.active) app.setHover(null); });
     window.addEventListener('keydown', (e) => this.onKey(e, true));
     window.addEventListener('keyup', (e) => this.onKey(e, false));
-    window.addEventListener('blur', () => { this.spaceDown = false; this.updateCursor(); });
+    window.addEventListener('blur', () => { this.spaceDown = false; this.zDown = false; this.updateCursor(); });
   }
 
   norm(e) {
@@ -77,9 +77,12 @@ export class Input {
     }
     if (this.active || this.panning) return;
 
-    const wantsPan = e.button === 1 || (e.button === 0 && this.spaceDown) || e.button === 4;
+    // Перо без колеса и щипка: масштаб перетаскиванием (пробел + ⌘/Ctrl или удерживаемая Z), сдвиг боковой кнопкой пера.
+    // Боковая кнопка может быть зажата уже в момент касания (тогда button=0, а в buttons стоит бит 2 или 4).
+    if (this.zoomMode(e)) { this.startZoom(e); return; }
+    const penButton = e.pointerType === 'pen' && (e.buttons & 6) !== 0;
+    const wantsPan = e.button === 1 || e.button === 2 || e.button === 4 || (e.button === 0 && this.spaceDown) || penButton;
     if (wantsPan) { this.startPan(e, 'mouse'); return; }
-    if (e.button === 2) { this.startPan(e, 'mouse'); return; }
 
     const ev = this.norm(e);
     let tool = app.tool;
@@ -105,6 +108,13 @@ export class Input {
         this.touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
         if (this.gesture) { this.updateGesture(); return; }
       }
+    }
+    if (this.zooming && this.zooming.id === e.pointerId) {
+      const z = this.zooming;
+      // вверх приближает, вниз отдаляет; точка под пером остаётся на месте
+      app.zoomAt(z.sx, z.sy, Math.exp(-(e.clientY - z.y) * 0.007));
+      z.y = e.clientY;
+      return;
     }
     if (this.panning && this.panning.id === e.pointerId) {
       app.panBy(e.clientX - this.panning.x, e.clientY - this.panning.y);
@@ -141,6 +151,11 @@ export class Input {
         return;
       }
     }
+    if (this.zooming && this.zooming.id === e.pointerId) {
+      this.zooming = null;
+      this.updateCursor();
+      return;
+    }
     if (this.panning && this.panning.id === e.pointerId) {
       this.panning = null;
       this.updateCursor();
@@ -166,6 +181,15 @@ export class Input {
     this.active = null;
     this.app.interacting = false;
     a.tool.cancel?.();
+  }
+
+  zoomMode(e) { return this.zDown || (this.spaceDown && (e.metaKey || e.ctrlKey)); }
+
+  startZoom(e) {
+    const r = this.rect;
+    this.zooming = { id: e.pointerId, y: e.clientY, sx: e.clientX - r.left, sy: e.clientY - r.top };
+    try { this.stage.setPointerCapture(e.pointerId); } catch { /* ignore */ }
+    this.stage.style.cursor = 'zoom-in';
   }
 
   startPan(e, kind) {
@@ -228,6 +252,11 @@ export class Input {
       if (was !== down) this.updateCursor();
       return;
     }
+    if (e.code === 'KeyZ' && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      if (this.isTypingTarget(e)) return;
+      if (this.zDown !== down) { this.zDown = down; this.updateCursor(); }
+      return;
+    }
     if (!down) return;
     if (this.isTypingTarget(e)) return;
     app.onKey(e);
@@ -243,6 +272,7 @@ export class Input {
   updateCursor() {
     const app = this.app;
     if (this.panning) { this.stage.style.cursor = 'grabbing'; return; }
+    if (this.zooming || this.zDown) { this.stage.style.cursor = 'zoom-in'; return; }
     if (this.spaceDown) { this.stage.style.cursor = 'grab'; return; }
     const t = this.active ? this.active.tool : app.tool;
     this.stage.style.cursor = t.cursor || 'default';
