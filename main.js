@@ -94,6 +94,8 @@ async function smoke(dir) {
   try {
     await wait(800);
     await run(`document.querySelector('.primary').click()`);
+    await wait(400);
+    await run(`document.querySelector('.tpl-card[data-tpl="blank"]').click()`);
     await wait(600);
     await run(`window.__board.setTool('pen')`);
     for (const [type, x, y] of [['mouseDown', 400, 300], ...Array.from({ length: 40 }, (_, i) => ['mouseMove', 400 + i * 8, 300 + Math.sin(i / 5) * 60]), ['mouseUp', 720, 300]]) {
