@@ -414,6 +414,43 @@ async function step(name, fn) {
     await B(() => { window.__board.cam.z = 1; window.__board.cameraChanged(true); });
   });
 
+  await step('мини-карта: чёткая, ведёт к объекту по клику, не ужимается из-за одиночного выброса', async () => {
+    const r = await B(async () => {
+      const a = window.__board, ui = a.ui;
+      const { makeShape } = await import('/core/scene.js');
+      a.scene.load([]);
+      // кластер из 80 объектов и один далёкий выброс
+      for (let i = 0; i < 80; i++) a.scene.add(makeShape('rect', (i % 10) * 160, Math.floor(i / 10) * 120, 120, 80), true);
+      const far = makeShape('rect', 60000, 40000, 120, 80); a.scene.add(far, true);
+      a.scene.emit('load');
+      a.cam.z = 0.5; a.cam.x = 0; a.cam.y = 0; a.cameraChanged(true);
+      ui.drawMinimap();
+      const objs = a.scene.all();
+      const view = a.cam.viewRect();
+      const region = ui.mapRegion(objs, view);
+      const full = a.scene.boundsOf(objs);
+      const dpr = window.devicePixelRatio || 1;
+      return { trimmedW: region.x1 - region.x0, fullW: full.w, backing: ui.miniCv.width, expect: Math.round(200 * dpr), css: ui.miniCv.clientWidth };
+    });
+    assert.ok(r.trimmedW < r.fullW * 0.1, `одиночный выброс не должен ужимать карту: ${r.trimmedW} против ${r.fullW}`);
+    assert.equal(r.backing, r.expect, 'холст карты с учётом плотности пикселей');
+    assert.equal(r.css, 200);
+    // клик по карте переносит центр вида в эту точку
+    const target = await B(() => {
+      const a = window.__board, ui = a.ui;
+      ui.drawMinimap();
+      const wx = 700, wy = 400; // центр кластера
+      const rect = ui.miniCv.getBoundingClientRect();
+      return { x: rect.left + wx * ui.mapT.k + ui.mapT.ox, y: rect.top + wy * ui.mapT.k + ui.mapT.oy, wx, wy };
+    });
+    await page.mouse.click(target.x, target.y);
+    const center = await B(() => { const a = window.__board; return a.cam.toWorld(a.cam.w / 2, a.cam.h / 2); });
+    assert.ok(Math.abs(center[0] - target.wx) < 60 && Math.abs(center[1] - target.wy) < 60, `центр вида ${center} вместо ${[target.wx, target.wy]}`);
+    // на карте нарисовано содержимое: есть непрозрачные цветные пиксели помимо фона
+    const colored = await B(() => { const cv = window.__board.ui.miniCv; const d = cv.getContext('2d').getImageData(0, 0, cv.width, cv.height).data; const bg = [d[0], d[1], d[2]]; let n = 0; for (let i = 0; i < d.length; i += 4) if (Math.abs(d[i] - bg[0]) + Math.abs(d[i + 1] - bg[1]) + Math.abs(d[i + 2] - bg[2]) > 40) n++; return n; });
+    assert.ok(colored > 300, 'на карте видно содержимое: ' + colored);
+  });
+
   await step('колесо: масштаб вокруг курсора и панорамирование трекпадом', async () => {
     await B(() => { const a = window.__board; a.cam.z = 1; a.cam.x = 0; a.cam.y = 0; a.cameraChanged(); });
     const w0 = await B(() => window.__board.cam.toWorld(700, 400));

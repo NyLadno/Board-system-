@@ -262,35 +262,162 @@ export class UI {
   }
 
   // ---------- мини-карта ----------
+  // Карта рисуется с учётом плотности пикселей экрана и показывает настоящую форму объектов:
+  // штрихи ломаными своего цвета, коннекторы линиями, фигуры, стикеры и рамки с заливкой, текст полосками.
+  // Единичные далёкие выбросы не ужимают остальное: область строится по основной массе объектов (границы Тьюки
+  // по квартилям), а выбросы отмечаются точками у края карты.
+  mapRegion(objs, view) {
+    const scene = this.app.scene;
+    this.mapOutliers = [];
+    let list = objs;
+    if (objs.length >= 12) {
+      const cs = objs.map((o) => { const b = scene.bounds(o); return [b.x + b.w / 2, b.y + b.h / 2]; });
+      const fence = (i) => {
+        const v = cs.map((c) => c[i]).sort((p, q) => p - q);
+        const q1 = v[Math.floor(v.length * 0.25)], q3 = v[Math.floor(v.length * 0.75)];
+        const iqr = Math.max(q3 - q1, 1);
+        return [q1 - 3 * iqr - 300, q3 + 3 * iqr + 300];
+      };
+      const [fx0, fx1] = fence(0), [fy0, fy1] = fence(1);
+      const inl = [], out = [];
+      objs.forEach((o, i) => ((cs[i][0] >= fx0 && cs[i][0] <= fx1 && cs[i][1] >= fy0 && cs[i][1] <= fy1) ? inl : out).push(o));
+      if (out.length && out.length <= objs.length * 0.1) { list = inl; this.mapOutliers = out; }
+    }
+    const v = { x0: view.x, y0: view.y, x1: view.x + view.w, y1: view.y + view.h };
+    if (!list.length) return v;
+    const f = scene.boundsOf(list);
+    return { x0: Math.min(f.x, v.x0), y0: Math.min(f.y, v.y0), x1: Math.max(f.x + f.w, v.x1), y1: Math.max(f.y + f.h, v.y1) };
+  }
+
   drawMinimap() {
     const app = this.app;
     const cv = this.miniCv;
-    if (!app.settings.minimap) return;
+    if (!app.settings.minimap || app.view !== 'board') return;
+    const W = 200, H = 140, dpr = window.devicePixelRatio || 1;
+    if (cv.width !== Math.round(W * dpr)) { cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr); }
     const ctx = cv.getContext('2d');
-    const W = cv.width, H = cv.height;
-    ctx.clearRect(0, 0, W, H);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    // фон карты совпадает с фоном доски
+    const style = app.boardStyle();
+    ctx.fillStyle = app.boardBgColor || (style === 'cells' ? '#ffffff' : '#f6f7f9');
+    ctx.fillRect(0, 0, W, H);
+
     const objs = app.scene.all();
     const view = app.cam.viewRect();
-    let b = objs.length ? app.scene.boundsOf(objs) : null;
-    const u = b ? { x: Math.min(b.x, view.x), y: Math.min(b.y, view.y), w: Math.max(b.x + b.w, view.x + view.w) - Math.min(b.x, view.x), h: Math.max(b.y + b.h, view.y + view.h) - Math.min(b.y, view.y) } : view;
-    const pad = 10;
-    const k = Math.min((W - pad * 2) / u.w, (H - pad * 2) / u.h);
-    const ox = (W - u.w * k) / 2 - u.x * k, oy = (H - u.h * k) / 2 - u.y * k;
+    // пока карту тянут пальцем или пером, область не пересчитываем, иначе она «уезжает» из-под курсора
+    const R = this.miniDrag && this.mapR ? this.mapR : this.mapRegion(objs, view);
+    this.mapR = R;
+    const pad = 8;
+    const rw = Math.max(R.x1 - R.x0, 1), rh = Math.max(R.y1 - R.y0, 1);
+    const k = Math.min((W - pad * 2) / rw, (H - pad * 2) / rh);
+    const ox = (W - rw * k) / 2 - R.x0 * k, oy = (H - rh * k) / 2 - R.y0 * k;
     this.mapT = { k, ox, oy };
-    const step = Math.max(1, Math.floor(objs.length / 1500));
+    const sx = (x) => x * k + ox, sy = (y) => y * k + oy;
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, 0, W, H);
+    ctx.clip();
+    const step = Math.max(1, Math.floor(objs.length / 4000));
+    const dark = app.dark;
     for (let i = 0; i < objs.length; i += step) {
       const o = objs[i];
-      const bb = app.scene.bounds(o);
-      ctx.fillStyle = o.type === 'sticky' ? o.s.fill : o.type === 'stroke' ? (o.s.color || '#333') : o.type === 'frame' ? 'rgba(120,125,135,.18)' : o.type === 'shape' ? '#c3c8d0' : '#9aa0a6';
-      ctx.globalAlpha = o.type === 'stroke' ? 0.7 : 1;
-      ctx.fillRect(bb.x * k + ox, bb.y * k + oy, Math.max(1.5, bb.w * k), Math.max(1.5, bb.h * k));
+      const b = app.scene.bounds(o);
+      const w = b.w * k, h = b.h * k;
+      if (w + h < 0.5) continue;
+      const x = sx(b.x), y = sy(b.y);
+      if (x > W || y > H || x + w < 0 || y + h < 0) continue;
+      switch (o.type) {
+        case 'frame':
+          ctx.fillStyle = dark ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.75)';
+          ctx.fillRect(x, y, w, h);
+          ctx.strokeStyle = dark ? 'rgba(255,255,255,0.35)' : 'rgba(95,99,104,0.55)';
+          ctx.lineWidth = 0.8;
+          ctx.strokeRect(x + 0.4, y + 0.4, Math.max(w - 0.8, 0.5), Math.max(h - 0.8, 0.5));
+          break;
+        case 'sticky':
+          ctx.fillStyle = o.s.fill;
+          ctx.fillRect(x, y, Math.max(w, 1.5), Math.max(h, 1.5));
+          break;
+        case 'shape': {
+          const fillOn = o.s.fill && o.s.fill !== 'transparent';
+          ctx.fillStyle = fillOn ? o.s.fill : 'rgba(0,0,0,0)';
+          ctx.strokeStyle = o.s.stroke || '#555';
+          ctx.lineWidth = 0.8;
+          ctx.beginPath();
+          if (o.shape === 'ellipse') ctx.ellipse(x + w / 2, y + h / 2, Math.max(w / 2, 0.8), Math.max(h / 2, 0.8), 0, 0, Math.PI * 2);
+          else ctx.rect(x, y, Math.max(w, 1.5), Math.max(h, 1.5));
+          if (fillOn) ctx.fill();
+          ctx.stroke();
+          break;
+        }
+        case 'text':
+          ctx.fillStyle = o.ts.color || '#333';
+          ctx.globalAlpha = 0.55;
+          ctx.fillRect(x, y + Math.max(h * 0.35, 0), Math.max(w, 1.5), Math.max(Math.min(h * 0.3, 2.5), 1));
+          ctx.globalAlpha = 1;
+          break;
+        case 'image':
+          ctx.fillStyle = 'rgba(120,130,150,0.35)';
+          ctx.fillRect(x, y, Math.max(w, 1.5), Math.max(h, 1.5));
+          break;
+        case 'stroke': {
+          const p = o.pts, n = p.length / 3;
+          ctx.strokeStyle = o.s.color || '#333';
+          ctx.globalAlpha = o.s.hl ? 0.4 : 0.95;
+          ctx.lineWidth = o.s.hl ? Math.max(o.s.size * k, 1.5) : Math.max(0.9, Math.min(o.s.size * k, 2));
+          ctx.lineCap = ctx.lineJoin = 'round';
+          ctx.beginPath();
+          const every = Math.max(1, Math.floor(n / 14));
+          ctx.moveTo(sx(p[0]), sy(p[1]));
+          for (let j = every; j < n; j += every) ctx.lineTo(sx(p[j * 3]), sy(p[j * 3 + 1]));
+          ctx.lineTo(sx(p[(n - 1) * 3]), sy(p[(n - 1) * 3 + 1]));
+          if (n === 1) ctx.lineTo(sx(p[0]) + 0.1, sy(p[1]));
+          ctx.stroke();
+          ctx.globalAlpha = 1;
+          break;
+        }
+        case 'connector': {
+          const pts = app.scene.route(o).pts;
+          ctx.strokeStyle = o.s.stroke || '#555';
+          ctx.globalAlpha = 0.8;
+          ctx.lineWidth = 0.9;
+          ctx.beginPath();
+          ctx.moveTo(sx(pts[0]), sy(pts[1]));
+          const every = Math.max(1, Math.floor(pts.length / 2 / 12)) * 2;
+          for (let j = every; j < pts.length - 2; j += every) ctx.lineTo(sx(pts[j]), sy(pts[j + 1]));
+          ctx.lineTo(sx(pts[pts.length - 2]), sy(pts[pts.length - 1]));
+          ctx.stroke();
+          ctx.globalAlpha = 1;
+          break;
+        }
+      }
     }
-    ctx.globalAlpha = 1;
+    // выбросы за пределами карты: точки у края в их направлении
+    if (this.mapOutliers && this.mapOutliers.length) {
+      const cx = W / 2, cy = H / 2;
+      ctx.fillStyle = dark ? 'rgba(255,255,255,0.7)' : 'rgba(60,70,90,0.75)';
+      for (const o of this.mapOutliers.slice(0, 12)) {
+        const b = app.scene.bounds(o);
+        let dx = sx(b.x + b.w / 2) - cx, dy = sy(b.y + b.h / 2) - cy;
+        const m = Math.max(Math.abs(dx) / (cx - 5), Math.abs(dy) / (cy - 5), 1e-6);
+        dx /= m; dy /= m;
+        ctx.beginPath();
+        ctx.arc(cx + dx, cy + dy, 2.2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+    // всё вне видимой области слегка затемняем, видимая область обведена
+    const vx = sx(view.x), vy = sy(view.y), vw = view.w * k, vh = view.h * k;
+    ctx.fillStyle = dark ? 'rgba(0,0,0,0.28)' : 'rgba(30,40,80,0.10)';
+    ctx.beginPath();
+    ctx.rect(0, 0, W, H);
+    ctx.rect(vx, vy, vw, vh);
+    ctx.fill('evenodd');
     ctx.strokeStyle = '#4262ff';
     ctx.lineWidth = 1.5;
-    ctx.fillStyle = 'rgba(66,98,255,.10)';
-    ctx.fillRect(view.x * k + ox, view.y * k + oy, view.w * k, view.h * k);
-    ctx.strokeRect(view.x * k + ox, view.y * k + oy, view.w * k, view.h * k);
+    ctx.strokeRect(vx, vy, vw, vh);
+    ctx.restore();
   }
 
   bindMinimap() {
@@ -298,16 +425,19 @@ export class UI {
     const go = (e) => {
       if (!this.mapT) return;
       const r = this.miniCv.getBoundingClientRect();
-      const sx = ((e.clientX - r.left) / r.width) * this.miniCv.width;
-      const sy = ((e.clientY - r.top) / r.height) * this.miniCv.height;
+      const sx = ((e.clientX - r.left) / r.width) * 200;
+      const sy = ((e.clientY - r.top) / r.height) * 140;
       const wx = (sx - this.mapT.ox) / this.mapT.k, wy = (sy - this.mapT.oy) / this.mapT.k;
       app.cam.x = wx - app.cam.w / 2 / app.cam.z;
       app.cam.y = wy - app.cam.h / 2 / app.cam.z;
       app.cameraChanged();
+      this.drawMinimap();
     };
-    this.miniCv.addEventListener('pointerdown', (e) => { this.miniCv.setPointerCapture(e.pointerId); this.miniDrag = true; go(e); });
+    this.miniCv.addEventListener('pointerdown', (e) => { this.miniCv.setPointerCapture(e.pointerId); this.miniDrag = true; this.mapR = null; go(e); });
     this.miniCv.addEventListener('pointermove', (e) => { if (this.miniDrag) go(e); });
-    this.miniCv.addEventListener('pointerup', () => { this.miniDrag = false; });
+    const end = () => { this.miniDrag = false; this.scheduleMini(); };
+    this.miniCv.addEventListener('pointerup', end);
+    this.miniCv.addEventListener('pointercancel', end);
   }
 
   // ---------- вид доски: стиль фона, цвет фона, цвет линий ----------
