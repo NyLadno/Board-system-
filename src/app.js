@@ -13,7 +13,7 @@ import { UI } from './ui/ui.js';
 import { setLang, detectLang, t } from './i18n.js';
 import { uid, debounce, download } from './core/util.js';
 import { textObjectHeight } from './render/draw.js';
-import { exportPNGBlob, exportSVGString, exportBoardJSON, parseBoardJSON } from './export.js';
+import { exportPNGBlob, exportSVGString, exportPDFBytes, exportBoardJSON, parseBoardJSON } from './export.js';
 
 const DEFAULT_SETTINGS = {
   pressure: 0.8,
@@ -55,6 +55,7 @@ function loadJSON(key, fallback) {
 export class App {
   constructor() {
     this.storage = new Storage();
+    this.boardAPI = window.boardAPI || null;
     this.scene = new Scene();
     this.cam = new Camera();
     this.history = new History(this.scene);
@@ -755,6 +756,19 @@ export class App {
     download(new Blob([svg], { type: 'image/svg+xml' }), `${this.meta.name || 'board'}.svg`);
   }
 
+  async exportPDF() {
+    const objs = this.selection.size ? this.selectedObjs() : this.scene.all();
+    if (!objs.length) return;
+    this.ui.toast(t('pdfWorking'));
+    try {
+      const bytes = await exportPDFBytes(this, objs);
+      download(new Blob([bytes], { type: 'application/pdf' }), `${this.meta.name || 'board'}.pdf`);
+    } catch (e) {
+      console.error(e);
+      this.ui.toast(t('pdfFail'));
+    }
+  }
+
   async exportJSON() {
     const json = await exportBoardJSON(this);
     download(new Blob([json], { type: 'application/json' }), `${this.meta.name || 'board'}.board.json`);
@@ -862,6 +876,7 @@ export class App {
       case 'home': return this.ui.showHome();
       case 'settings': return this.ui.openSettings();
       case 'export-png': return this.view === 'board' && this.exportPNG();
+      case 'export-pdf': return this.view === 'board' && this.exportPDF();
       case 'export-svg': return this.view === 'board' && this.exportSVG();
       case 'export-json': return this.view === 'board' && this.exportJSON();
       case 'import-json': return this.importJSON();

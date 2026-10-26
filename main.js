@@ -64,6 +64,21 @@ function registerIpc() {
     await atomicWrite(path.join(assetDir(), safeId(id)), Buffer.from(bytes));
   });
   ipcMain.handle('assets:url', async (_e, id) => pathToFileURL(path.join(assetDir(), safeId(id))).href);
+  // Векторный PDF: SVG печатается скрытым окном Chromium, страница равна размеру содержимого
+  ipcMain.handle('export:pdf', async (_e, svg, w, h) => {
+    if (typeof svg !== 'string' || !(w > 0) || !(h > 0) || svg.length > 300e6) throw new Error('bad pdf request');
+    const pw = new BrowserWindow({
+      show: false, width: 800, height: 600,
+      webPreferences: { javascript: false, sandbox: true, contextIsolation: true, nodeIntegration: false },
+    });
+    try {
+      const html = `<!doctype html><meta charset="utf-8"><style>@page{size:${w}px ${h}px;margin:0}html,body{margin:0;padding:0}svg{display:block}</style>${svg.replace(/^<\?xml[^>]*>\s*/, '')}`;
+      await pw.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
+      return await pw.webContents.printToPDF({ printBackground: true, preferCSSPageSize: true, margins: { marginType: 'none' } });
+    } finally {
+      pw.destroy();
+    }
+  });
   ipcMain.handle('theme:get', () => nativeTheme.shouldUseDarkColors);
 }
 
@@ -91,6 +106,10 @@ async function smoke(dir) {
     await wait(500);
     const fs2 = require('fs');
     log.push('boards: ' + fs2.readdirSync(path.join(app.getPath('userData'), 'boards')).join(','));
+    log.push(await run(`(async () => { const a = window.__board; const m = await import('./export.js'); const b = await m.exportPDFBytes(a, a.scene.all()); const t = new TextDecoder('latin1').decode(b.slice(0, 8)); const mb = new TextDecoder('latin1').decode(b).match(/MediaBox\\s*\\[[^\\]]*\\]/); return JSON.stringify({ size: b.length, head: t.slice(0, 5), mediaBox: mb && mb[0] }); })()`));
+    await run(`(async () => { const a = window.__board; const m = await import('./scene.js').catch(() => import('./core/scene.js')); const sh = m.makeShape('round', 100, 100, 220, 120); sh.text = 'Привет, PDF'; sh.s.fill = '#d8c4ff'; a.scene.add(sh, true); const st = m.makeSticky(380, 80, '#fff1a8', 180); st.text = 'Стикер с текстом, который переносится'; a.scene.add(st, true); const c = m.makeConnector({ id: sh.id, port: 'r' }, { id: st.id, port: 'l' }, 'elbow'); a.scene.add(c, true); a.scene.emit('load'); })()`);
+    const pdfBytes = await run(`(async () => { const a = window.__board; const m = await import('./export.js'); return Array.from(await m.exportPDFBytes(a, a.scene.all())); })()`);
+    require('fs').writeFileSync(path.join(dir, 'board.pdf'), Buffer.from(pdfBytes));
     const img = await wc.capturePage();
     fs2.writeFileSync(path.join(dir, 'electron.png'), img.toPNG());
     log.push('ok');
@@ -168,6 +187,7 @@ function buildMenu() {
         { label: 'Все доски', accelerator: 'CmdOrCtrl+Shift+H', click: send('home') },
         { type: 'separator' },
         { label: 'Экспорт PNG…', accelerator: 'CmdOrCtrl+Shift+E', click: send('export-png') },
+        { label: 'Экспорт PDF…', accelerator: 'CmdOrCtrl+Shift+P', click: send('export-pdf') },
         { label: 'Экспорт SVG…', click: send('export-svg') },
         { label: 'Сохранить доску в файл…', click: send('export-json') },
         { label: 'Открыть файл доски…', click: send('import-json') },

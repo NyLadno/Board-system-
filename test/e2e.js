@@ -226,6 +226,19 @@ async function step(name, fn) {
     assert.equal(r.assets, 1);
   });
 
+  await step('экспорт PDF (запасной растровый вариант в браузере)', async () => {
+    const r = await B(async () => {
+      const a = window.__board;
+      const m = await import('/export.js');
+      const bytes = await m.exportPDFBytes(a, a.scene.all());
+      const t = new TextDecoder('latin1').decode(bytes);
+      return { head: t.slice(0, 8), tail: t.trimEnd().slice(-5), box: (t.match(/MediaBox \[0 0 ([\d.]+) ([\d.]+)\]/) || []).slice(1).map(Number), size: bytes.length };
+    });
+    assert.equal(r.head.slice(0, 5), '%PDF-');
+    assert.equal(r.tail, '%%EOF');
+    assert.ok(r.box[0] > 100 && r.box[1] > 100 && r.size > 3000, JSON.stringify(r));
+  });
+
   await step('бесконечный холст: далёкие координаты, перенос начала, пределы масштаба', async () => {
     const mark = await B(() => { const a = window.__board; const s = a.scene.all().find((o) => o.type === 'sticky'); return { id: s.id, x: s.x }; });
     // уезжаем на сто миллионов единиц от начала координат

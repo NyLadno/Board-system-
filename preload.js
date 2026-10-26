@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld('boardAPI', {
   remove: (id) => ipcRenderer.invoke('boards:remove', id),
   putAsset: (id, bytes) => ipcRenderer.invoke('assets:put', id, bytes),
   assetURL: (id) => ipcRenderer.invoke('assets:url', id),
+  exportPDF: (svg, w, h) => ipcRenderer.invoke('export:pdf', svg, w, h),
   isDark: () => ipcRenderer.invoke('theme:get'),
   onCommand: (fn) => ipcRenderer.on('cmd', (_e, cmd, ...args) => fn(cmd, ...args)),
   onFlush: (fn) => ipcRenderer.on('app:flush', async () => {

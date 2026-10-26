@@ -115,14 +115,38 @@ async function objSvg(app, o) {
   return `<g ${tr}${op}>${body}</g>`;
 }
 
-export async function exportSVGString(app, objs) {
+// size: необязательный размер в пикселях (viewBox сохраняется, содержимое масштабируется)
+export async function exportSVGParts(app, objs, size) {
   const b = app.scene.boundsOf(objs);
   const pad = 20;
   const x = f(b.x - pad), y = f(b.y - pad), w = f(b.w + pad * 2), h = f(b.h + pad * 2);
   const parts = [];
   for (const o of [...objs].sort((a, c) => a.z - c.z)) parts.push(await objSvg(app, o));
-  return `<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" viewBox="${x} ${y} ${w} ${h}" width="${w}" height="${h}">` +
+  const k = size ? Math.min(1, size / Math.max(w, h)) : 1;
+  const svg = `<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" viewBox="${x} ${y} ${w} ${h}" width="${f(w * k)}" height="${f(h * k)}">` +
     `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="#ffffff"/>${parts.join('')}</svg>`;
+  return { svg, w: f(w * k), h: f(h * k) };
+}
+
+export async function exportSVGString(app, objs) {
+  return (await exportSVGParts(app, objs)).svg;
+}
+
+// PDF: в Electron векторный (печать SVG движком Chromium), в браузере запасной растровый
+export async function exportPDFBytes(app, objs) {
+  if (app.boardAPI && app.boardAPI.exportPDF) {
+    // страница PDF не может быть больше 200 дюймов, поэтому очень большие доски вписываем в 14000 px
+    const { svg, w, h } = await exportSVGParts(app, objs, 14000);
+    return app.boardAPI.exportPDF(svg, w, h);
+  }
+  const b = app.scene.boundsOf(objs);
+  const pad = 24;
+  const rect = { x: b.x - pad, y: b.y - pad, w: b.w + pad * 2, h: b.h + pad * 2 };
+  const scale = Math.min(2, 8000 / Math.max(rect.w, rect.h));
+  const cv = app.renderer.renderToCanvas([...objs].sort((a, c) => a.z - c.z), rect, scale, { background: '#ffffff' });
+  const jpeg = await new Promise((res) => cv.toBlob(res, 'image/jpeg', 0.92));
+  const { jpegToPdf } = await import('./pdf.js');
+  return jpegToPdf(new Uint8Array(await jpeg.arrayBuffer()), cv.width / scale, cv.height / scale);
 }
 
 export function exportPNGBlob(app, objs) {

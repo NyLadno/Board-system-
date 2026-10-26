@@ -56,6 +56,7 @@ export class UI {
     exportBtn.addEventListener('click', () => {
       const menu = h('div', { class: 'menu' },
         h('button', { onclick: () => { closePopover(); app.exportPNG(); } }, t('exportPng')),
+        h('button', { onclick: () => { closePopover(); app.exportPDF(); } }, t('exportPdf')),
         h('button', { onclick: () => { closePopover(); app.exportSVG(); } }, t('exportSvg')),
         h('button', { onclick: () => { closePopover(); app.exportJSON(); } }, t('exportJson')),
         h('hr'),
